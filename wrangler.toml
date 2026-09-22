@@ -18,7 +18,7 @@ enabled = false
 
 [vars]
 ACCESS_ISSUER = "https://tractorbeamai.cloudflareaccess.com"
-# Written by npm run setup after creating the single Access application.
+# Copy remote_cache_access_aud from the applied corporate infra stack.
 ACCESS_AUD = ""
 MAX_ARTIFACT_BYTES = 67108864
 
@@ -26,7 +26,7 @@ MAX_ARTIFACT_BYTES = 67108864
 # No service identities are allowed until explicitly configured here and in Access.
 [vars.SERVICE_PROJECTS]
 
-# BEGIN GENERATED PROJECTS — npm run sync-projects
+# Copy remote_cache_project_groups from the applied corporate infra stack.
 [vars.PROJECTS]
 avathon = "Project: Avathon"
 caddi = "Project: CADDi"
@@ -36,7 +36,7 @@ linden-investment = "Project: Linden (Investment)"
 linden-tech = "Project: Linden (Tech)"
 soc-2 = "Project: SOC 2"
 tempus = "Project: Tempus"
-# END GENERATED PROJECTS
+
 
 [[r2_buckets]]
 binding = "ARTIFACTS"

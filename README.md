@@ -1,169 +1,118 @@
 # Cloudflare-native Turborepo remote cache
 
-Hono on Cloudflare Workers with private R2 storage and Cloudflare Access.
-The service runs in the corporate account alongside the existing WARP organization.
+Hono on Cloudflare Workers with private R2 storage and one corporate Cloudflare
+Access application. The Worker runs in the same Access organization as developer
+WARP enrollment.
 
 ```mermaid
 flowchart LR
-  Client[Developer on WARP or project CI] --> Access[One corporate Access application]
-  Access --> Worker[Verify JWT and project membership]
+  Client[Developer on WARP] --> Access[Corporate Access application]
+  Access --> Worker[Verify signed project membership]
   Worker --> R2[Private R2: project/hash]
 ```
 
 ## Authorization
 
-One Access application protects `*.cache.tractorbeam.tools`. It admits members of
-an enabled project's existing Okta group. The Worker verifies the Access JWT's
-RS256 signature, issuer, audience, expiry, application-token type, and identity.
-Admission alone does not authorize an artifact: the signed `custom.groups` claim
-must include the requested project's exact `Project: <display_name or name>` group.
-Missing, malformed, or oversized claims deny access. Caller-supplied group headers
-are never trusted, and no identity lookup runs on artifact requests.
+The corporate [infra stack](https://github.com/tractorbeamai/infra/pull/1541)
+creates one Access application for `*.cache.tractorbeam.tools`. Its Allow policy
+admits the existing Okta groups of projects with `remote_cache: true` in
+`infra/data/projects.json`. The shared Okta integration forwards a filtered
+`Project: ` groups claim. The Worker verifies the application JWT's signature,
+issuer, audience, expiry and identity, then requires the exact project group in
+its signed `custom.groups` claim. Missing, malformed and oversized claims deny
+access. Caller-supplied group headers never grant permission.
 
-`teamId` is a key from
-[infra/data/projects.json](https://github.com/tractorbeamai/infra/blob/main/data/projects.json),
-such as `caddi` or `linden-investment`. `slug` is an alternative for the same key.
-At least one selector is required; repeated or conflicting selectors are rejected.
-The hostname does not grant project permission. Both reads and writes use the
-same membership check. R2 keys include the authorized project, so identical hashes
-in different projects remain independent.
+`teamId` is a project key such as `caddi` or `linden-investment`; `slug` is an
+alternative selector. At least one is required, and duplicates or conflicting
+selectors are rejected. The hostname does not grant project permission. Reads
+and writes use the same group check. R2 keys include the authorized project, so
+identical hashes in different projects remain independent.
 
-Only projects with `remote_cache: true` are enabled. `npm run sync-projects` reads
-the registry from infra's main branch and updates `[vars.PROJECTS]` in
-`wrangler.toml`. `npm run deploy` always performs this sync first. Redeploy after
-changing project flags or group names. For reviewing an unmerged registry locally:
+`[vars.PROJECTS]` in [wrangler.toml](wrangler.toml) must match the applied
+`remote_cache_project_groups` Terraform output. Deploy the Worker after every
+project flag or group-name change. **Disabling a project is complete only after
+the Worker map is updated.** Someone who also belongs to an enabled project can
+still pass Access admission with a stale Worker map. The shared identity config
+bounds all registered project group names below 700 bytes and 64 groups, leaving
+headroom under Cloudflare's approximate 1 KB custom-claim limit.
 
-```sh
-npm run sync-projects -- /path/to/infra/data/projects.json
-```
-
-The shared Okta integration emits only `Project: ` memberships. Infra and the sync
-command bound the worst-case claim below 700 bytes and 64 groups, including
-projects without caches. Access may omit large custom claims; the Worker rejects
-missing claims instead of granting broader access. Group removal takes effect
-when the identity/session refreshes; disable a project's namespace and redeploy
-when all access to that project must stop immediately.
-
-Service tokens have no user memberships. `[vars.SERVICE_PROJECTS]` maps Access
-client IDs (public identifiers, never client secrets) to allowed project keys.
-It is empty by default. Setup resolves those IDs to existing service tokens and
-creates a narrowly scoped Service Auth policy. The Worker independently enforces
-the map. Changing a query parameter cannot expand a CI identity's permissions.
+Access service tokens do not have human group memberships. `SERVICE_PROJECTS` is
+empty by default, so the Worker rejects them. If CI access is later needed, add a
+narrow Service Auth policy in infra and map that token's public client ID to only
+its enabled project keys in `wrangler.toml`. The secret does not belong in Git.
 
 ## Storage and limits
 
-GET streams directly from private R2; HEAD reads object metadata. There is no CDN
-or Worker response cache. Client responses are `private, no-store`.
+GET streams directly from R2; HEAD reads object metadata. There is no CDN or
+Worker response cache. Client responses use `private, no-store`. Infra disables
+the bucket's `r2.dev` endpoint and expires objects after 30 days and incomplete
+multipart uploads after one day. Developers do not need R2 credentials.
 
-Uploads stream with atomic first-writer-wins behavior: retries do not replace an
-existing artifact's bytes or metadata. Objects expire after 30 days and incomplete
-multipart uploads after one day. The bucket has no public custom domains and its
-`r2.dev` endpoint is disabled. Developers do not need R2 credentials.
-
-Limits: 64 MiB per artifact, 64 KiB JSON, 128 entries per batch, 256 hexadecimal
-characters per hash, and 600 requests/minute per verified identity/project per
-Cloudflare location. The rate limiter is abuse control, not a global quota.
-Duration, signature tag, source SHA and dirty hash are preserved. Events are
-validated and acknowledged without storing build telemetry. There is no delete API.
+Uploads stream with atomic first-writer-wins behavior. Retries cannot replace an
+existing artifact's bytes or metadata. Limits: 64 MiB per artifact, 64 KiB JSON,
+128 entries per batch, 256 hexadecimal characters per hash, and 600 requests per
+minute per verified identity/project per Cloudflare location. The rate limiter
+is abuse control, not a global quota. Metadata and signature tags are preserved;
+cache event reports are acknowledged without storing build telemetry.
 
 ## Development and verification
 
 Requires Node 24 and uv for the isolated Schemathesis CLI. There is no Python
-project or Python lockfile; uv manages Schemathesis's own runtime and dependencies.
+project or Python lockfile; uv manages Schemathesis's runtime and dependencies.
 
 ```sh
 npm ci
 npm run check
 ```
 
-Checks include TypeScript, formatting, a deployment dry run, real local workerd/R2
+Checks include TypeScript, formatting, a Wrangler dry run, local workerd/R2
 security and protocol tests, and Schemathesis against the unchanged upstream
-OpenAPI document. Test fixtures sign ephemeral Access JWTs and mock only JWKS
-retrieval. They do not bypass the production authorization code.
-[Contract provenance and exceptions](spec/README.md) describe the exact coverage.
+OpenAPI document. Test fixtures sign ephemeral JWTs and mock only JWKS retrieval.
+[Contract provenance and exceptions](spec/README.md) describe the coverage.
+Local tests do not establish live Access or WARP behavior.
 
-`npm run dev` fails closed until a real issuer/audience and identity are available.
-The automated tests provide their own isolated local server and identity fixture.
+## Deployment
 
-## Configuration and deployment
+This repository owns Worker code, routes, bindings and non-secret runtime settings
+in `wrangler.toml`. Infra owns the Access application, Okta claim forwarding, R2
+privacy and retention. No custom setup or deployment orchestration is needed.
 
-This repo owns the Worker and its supporting cache resources:
+1. Apply [infra PR #1541](https://github.com/tractorbeamai/infra/pull/1541)
+   through its normal workflow. Copy `remote_cache_access_aud` into `ACCESS_AUD`
+   and `remote_cache_project_groups` into `[vars.PROJECTS]` here. These values are
+   public configuration, not secrets.
+2. Authenticate a managed device again and verify its signed Access application
+   JWT includes the expected `custom.groups`. The app enables WARP authentication
+   explicitly; infra does not change the organization-wide setting.
+3. Establish corporate zone, proxy and TLS routing for
+   `*.cache.tractorbeam.tools`, preserving Route 53 DNS ownership. The Wrangler
+   route does not create a zone or change authoritative DNS.
+4. Use an authorized corporate Wrangler session or scoped API token, then run
+   `npm run check` and `npm run deploy`. Wrangler has `workers_dev` and previews
+   disabled. Test two projects with the same hash, absent group claims, direct
+   bucket access and alternate Worker URLs before considering rollout complete.
 
-| File                           | Responsibility                                                                      |
-| ------------------------------ | ----------------------------------------------------------------------------------- |
-| `wrangler.toml`                | Corporate account, routes, R2 binding, issuer/audience, project and CI maps, limits |
-| `cloudflare/access.json`       | Single Access application, corporate Okta provider, WARP authentication             |
-| `cloudflare/r2-lifecycle.json` | Artifact and multipart expiry                                                       |
-| `scripts/setup.mjs`            | Reconcile Access through its API; manage private R2 with Wrangler                   |
-
-Wrangler does not declare production Access policies or R2 lifecycle rules in
-TOML. The small setup command keeps those settings in this repo rather than infra.
-Infra retains only shared Okta/Access claim forwarding and project definitions.
-See [project access](docs/project-access.md) for the identity integration.
-
-1. Apply [infra PR #1541](https://github.com/tractorbeamai/infra/pull/1541) through
-   its normal workflow. This adds the filtered Okta groups claim and Access claim
-   forwarding. It creates no cache-specific resources.
-2. Authenticate a managed device again and verify the signed Access application
-   JWT contains `custom.groups` through WARP. The app enables WARP authentication
-   explicitly; no organization-wide authentication setting is changed.
-3. Establish corporate routing for `*.cache.tractorbeam.tools`, preserving Route
-   53 DNS ownership and the appropriate Cloudflare zone, proxy, and TLS setup.
-   `wrangler.toml` declares the intended Worker route; it does not create a zone
-   or change authoritative DNS.
-4. Supply a scoped `CLOUDFLARE_API_TOKEN` through your approved local or CI secret
-   environment. Setup needs Access app management, IdP metadata read, R2 management,
-   and service-token metadata read if CI mappings are configured. Deployment also
-   needs Worker and route management. Never commit the token.
-5. Sync and preview the desired Access application, then run checks and deploy:
-
-   ```sh
-   npm run sync-projects
-   npm run setup
-   npm run check
-   npm run deploy
-   ```
-
-`npm run setup` only previews. `npm run setup -- --apply` reconciles the Access app
-and private bucket and writes the public audience tag into `wrangler.toml`.
-Deployment syncs projects, reconciles setup, and calls Wrangler. Setup refuses to
-proceed until the corporate IdP forwards `groups`. It replaces this cache app's
-policies and bucket lifecycle with the checked-in definitions; edit those sources
-instead of making dashboard changes. Commit refreshed project mappings and AUD.
-
-Before declaring rollout complete, verify authorized WARP upload/download,
-missing-claim denial, denial between two projects, mapped/unmapped CI identities,
-and denial at direct R2 and alternate Worker URLs. Keep `workers_dev` and preview
-URLs disabled. Account administrators and independent R2 credentials remain
-separate access paths; review their permissions separately.
-
-Current status: not deployed. Wrangler has no usable login/API token, the shared
-claim changes are pending in infra, and the connected corporate API returned no
-`tractorbeam.tools` zone. These must be resolved before publishing the route.
-
-Rollback Worker code with `npx wrangler rollback`. Retain Access and bucket privacy.
-Rolling back project maps or service allowlists can restore access, so review them
-alongside the code version.
+Current status: not deployed. The connected corporate API returned no
+`tractorbeam.tools` zone, Wrangler has no usable login/API token, and the shared
+identity change has not been applied. The empty `ACCESS_AUD` leaves the Worker
+fail closed until the actual Terraform output is copied. Keep the Access policy
+and private bucket settings in place when rolling back Worker code.
 
 ## Client setup
 
 The API is rooted at `/artifacts/...`, with no `/v8` compatibility route.
-Stock Turbo hardcodes `/v8/artifacts/...`, so a modified client is still required;
+Stock Turbo hardcodes `/v8/artifacts/...`, so a modified client is required;
 setting `TURBO_API` does not remove that prefix.
 
-Use `https://caddi.cache.tractorbeam.tools` with `teamId=caddi`, for example.
-Access supplies the signed `Cf-Access-Jwt-Assertion`; it takes precedence over any
-bearer token. A signed application JWT may also be supplied as a bearer for
-protocol testing. An invalid assertion never falls back to a valid bearer.
-
-CI clients supply `CF-Access-Client-Id` and `CF-Access-Client-Secret`. The secret
-itself is not an application JWT. Clients should verify artifact signatures before
-restoring outputs; the server stores artifacts and signature tags as opaque data.
+A client for CADDi uses `https://caddi.cache.tractorbeam.tools` with
+`teamId=caddi`. Access supplies the signed `Cf-Access-Jwt-Assertion`; it takes
+precedence over any bearer token. A signed application JWT can also be supplied
+as a bearer for protocol testing. An invalid assertion cannot fall back to a
+valid bearer. Clients should verify artifact signatures before restoring outputs.
 
 ## Sources
 
 - [Turborepo remote-cache specification](https://turborepo.dev/api/remote-cache-spec)
 - [Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
-- [Access application tokens and custom-claim limits](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)
+- [Application tokens and custom-claim limits](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)
 - [Custom OIDC claims](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/generic-oidc/#custom-oidc-claims)
-- [Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)

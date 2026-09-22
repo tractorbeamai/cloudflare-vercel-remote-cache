@@ -16,9 +16,7 @@
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:contract": "node scripts/test-contract.mjs",
     "check": "npm run typecheck && npm run format:check && npm run build && npm test && npm run test:contract",
-    "deploy": "node scripts/deploy.mjs",
-    "sync-projects": "node scripts/sync-projects.mjs",
-    "setup": "node scripts/setup.mjs"
+    "deploy": "wrangler deploy --minify"
   },
   "dependencies": {
     "hono": "4.13.8",
