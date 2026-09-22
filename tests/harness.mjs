@@ -1,24 +1,20 @@
 import { Miniflare } from "miniflare";
 import { build } from "esbuild";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
-import { readConfig } from "../scripts/config.mjs";
 
 // All fixtures run the same Worker; only identities and storage need isolation.
-const fixture = Promise.all([
-  readConfig(),
-  build({
-    entryPoints: ["src/index.ts"],
-    bundle: true,
-    write: false,
-    format: "esm",
-    platform: "neutral",
-    target: "es2022",
-    external: ["cloudflare:workers"],
-  }),
-]);
+const fixture = build({
+  entryPoints: ["src/index.ts"],
+  bundle: true,
+  write: false,
+  format: "esm",
+  platform: "neutral",
+  target: "es2022",
+  external: ["cloudflare:workers"],
+});
 
 export async function startHarness(overrides = {}, options = {}) {
-  const [config, compiled] = await fixture;
+  const compiled = await fixture;
   const { privateKey, publicKey } = await generateKeyPair("RS256", {
     extractable: true,
   });
@@ -43,9 +39,9 @@ export async function startHarness(overrides = {}, options = {}) {
       .setExpirationTime(claims.exp ?? "1h")
       .sign(privateKey);
   const bindings = {
-    ...config.vars,
     ACCESS_ISSUER: issuer,
     ACCESS_AUD: "cache-audience",
+    MAX_ARTIFACT_BYTES: 67108864,
     PROJECTS: { caddi: "Project: CADDi", carlyle: "Project: Carlyle" },
     SERVICE_PROJECTS: {
       "test-client.access": ["caddi"],
@@ -59,10 +55,9 @@ export async function startHarness(overrides = {}, options = {}) {
     workers: [
       {
         config: {
-          name: config.name,
-          compatibilityDate: config.compatibility_date,
-          compatibilityFlags: config.compatibility_flags,
-          cache: config.cache,
+          name: "cache-test",
+          compatibilityDate: "2026-09-22",
+          compatibilityFlags: ["nodejs_compat"],
           manifest: {
             mainModule: "worker.js",
             modules: {
