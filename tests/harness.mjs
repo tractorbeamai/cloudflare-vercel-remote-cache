@@ -1,0 +1,105 @@
+import { Miniflare } from "miniflare";
+import { build } from "esbuild";
+import { generateKeyPair, exportJWK, SignJWT } from "jose";
+import { readConfig } from "../scripts/config.mjs";
+
+export async function startHarness(overrides = {}, options = {}) {
+  const config = await readConfig();
+  const compiled = await build({
+    entryPoints: ["src/index.ts"],
+    bundle: true,
+    write: false,
+    format: "esm",
+    platform: "neutral",
+    target: "es2022",
+    external: ["cloudflare:workers"],
+  });
+  const { privateKey, publicKey } = await generateKeyPair("RS256", {
+    extractable: true,
+  });
+  const jwk = {
+    ...(await exportJWK(publicKey)),
+    kid: "test-key",
+    alg: "RS256",
+    use: "sig",
+  };
+  const issuer = "https://test.cloudflareaccess.com";
+  const sign = (claims = {}) =>
+    new SignJWT({ ...claims })
+      .setProtectedHeader({ alg: "RS256", kid: "test-key" })
+      .setIssuer(claims.iss ?? issuer)
+      .setSubject(claims.sub ?? "test-user")
+      .setAudience(claims.aud ?? "write-audience")
+      .setIssuedAt()
+      .setExpirationTime(claims.exp ?? "1h")
+      .sign(privateKey);
+  const bindings = {
+    ...config.vars,
+    ACCESS_ISSUER: issuer,
+    ACCESS_READ_AUD: "read-audience",
+    ACCESS_WRITE_AUD: "write-audience",
+    ...overrides,
+  };
+  const mf = new Miniflare({
+    host: "127.0.0.1",
+    port: 0,
+    workers: [
+      {
+        config: {
+          name: config.name,
+          compatibilityDate: config.compatibility_date,
+          compatibilityFlags: config.compatibility_flags,
+          cache: config.cache,
+          exports: config.exports,
+          manifest: {
+            mainModule: "worker.js",
+            modules: {
+              "worker.js": {
+                type: "esm",
+                contents: compiled.outputFiles[0].text,
+              },
+            },
+          },
+          env: {
+            ...Object.fromEntries(
+              Object.entries(bindings).map(([k, value]) => [
+                k,
+                { type: "json", value },
+              ]),
+            ),
+            ARTIFACTS: { type: "r2", name: "test-artifacts" },
+            REQUEST_LIMITER: {
+              type: "rate-limit",
+              namespace: "test-limit",
+              simple: { limit: options.rateLimit ?? 100000, period: 60 },
+            },
+          },
+        },
+        dev: {
+          outboundService: {
+            type: "fetcher",
+            handler: async (request) => {
+              if (request.url !== `${issuer}/cdn-cgi/access/certs`)
+                throw new Error(`Unexpected outbound URL: ${request.url}`);
+              return Response.json({ keys: [jwk] });
+            },
+          },
+        },
+      },
+    ],
+  });
+  const url = (await mf.ready).origin;
+  const token = await sign();
+  return {
+    mf,
+    url,
+    token,
+    sign,
+    close: () => mf.dispose(),
+    request: (path, init = {}) =>
+      fetch(`${url}${path}`, {
+        ...init,
+        headers: { Authorization: `Bearer ${token}`, ...init.headers },
+      }),
+  };
+}

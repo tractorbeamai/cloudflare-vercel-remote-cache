@@ -1,0 +1,37 @@
+{
+  "name": "@tractorbeam/cloudflare-vercel-remote-cache",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "typegen": "wrangler types --strict-vars=false",
+    "typecheck": "npm run typegen && tsc --noEmit",
+    "build": "wrangler deploy --dry-run --minify --outdir dist",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test:contract": "uv run pytest tests/contract -q",
+    "check": "npm run typecheck && npm run format:check && npm run lint:python && npm run build && npm test && npm run test:contract",
+    "deploy": "node scripts/deploy.mjs",
+    "lint:python": "uv run ruff check tests/contract && uv run ruff format --check tests/contract"
+  },
+  "dependencies": {
+    "hono": "4.13.8",
+    "jose": "6.2.12",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "esbuild": "0.28.2",
+    "jsonc-parser": "3.3.1",
+    "miniflare": "5.20260921.0-alpha",
+    "prettier": "3.9.8",
+    "turbo": "2.11.2",
+    "typescript": "7.0.2",
+    "wrangler": "4.136.3"
+  }
+}
