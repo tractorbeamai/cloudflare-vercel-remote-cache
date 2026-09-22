@@ -14,7 +14,7 @@ Examples from current infra:
 | linden-investment | Project: Linden (Investment) | linden-investment.cache.tractorbeam.tools |
 | linden-tech       | Project: Linden (Tech)       | linden-tech.cache.tractorbeam.tools       |
 
-The companion infra change generates Access applications for all project keys,
+The companion infra change generates Access applications for opted-in project keys,
 using the native Okta group selector and the existing nonprod Okta provider.
 It does not recreate groups, store users, or broaden Cloudflare One enrollment.
 Each application's audience grants access to exactly one cache project.
@@ -36,7 +36,10 @@ The R2 prefix and internal cache URL use the authorized project key. The same ha
 may contain different bytes in different projects without a collision.
 
 Application removal and Worker configuration removal should be coordinated.
-Removing a project from the registry removes its Access application on apply;
+Only projects with `remote_cache: true` in the registry receive cache Access
+applications and appear in the Worker configuration output. Omitted or false
+disables the project cache. Disabling the flag or removing a project removes its
+Access application on apply;
 remove its AUD from the Worker binding too. Existing signed JWTs can otherwise
 remain locally valid until expiration. Artifacts expire through R2 lifecycle,
 and cached copies can persist for the configured cache TTL.
