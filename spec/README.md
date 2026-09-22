@@ -4,7 +4,7 @@
 3.0.3 document. `provenance.json` records the source, date and SHA-256. The CLI
 reads this file directly: no schema rewriting, generated overlay, or Python hooks.
 
-`npm run test:contract` starts an isolated workerd/R2 fixture and invokes the
+`pnpm test:contract` starts an isolated workerd/R2 fixture and invokes the
 pinned Schemathesis CLI through `uvx`. Authentication uses freshly generated
 Access-style JWTs and the production verifier. No cloud credentials are needed.
 The routes match the schema at `/artifacts/...`; there is no `/v8` alias.

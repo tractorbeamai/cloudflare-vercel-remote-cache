@@ -3,19 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "dev": "wrangler dev",
     "typegen": "wrangler types --strict-vars=false",
-    "typecheck": "npm run typegen && tsc --noEmit",
+    "typecheck": "pnpm typegen && tsc --noEmit",
     "build": "wrangler deploy --dry-run --minify --outdir dist",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:contract": "node scripts/test-contract.mjs",
-    "check": "npm run typecheck && npm run format:check && npm run build && npm test && npm run test:contract",
+    "check": "pnpm typecheck && pnpm format:check && pnpm build && pnpm test && pnpm test:contract",
     "deploy": "wrangler deploy --minify"
   },
   "dependencies": {

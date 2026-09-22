@@ -61,8 +61,8 @@ Requires Node 24 and uv for the isolated Schemathesis CLI. There is no Python
 project or Python lockfile; uv manages Schemathesis's runtime and dependencies.
 
 ```sh
-npm ci
-npm run check
+pnpm install --frozen-lockfile
+pnpm check
 ```
 
 Checks include TypeScript, formatting, a Wrangler dry run, local workerd/R2
@@ -88,7 +88,7 @@ privacy and retention. No custom setup or deployment orchestration is needed.
    `*.cache.tractorbeam.tools`, preserving Route 53 DNS ownership. The Wrangler
    route does not create a zone or change authoritative DNS.
 4. Use an authorized corporate Wrangler session or scoped API token, then run
-   `npm run check` and `npm run deploy`. Wrangler has `workers_dev` and previews
+   `pnpm check` and `pnpm deploy`. Wrangler has `workers_dev` and previews
    disabled. Test two projects with the same hash, absent group claims, direct
    bucket access and alternate Worker URLs before considering rollout complete.
 
