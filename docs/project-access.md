@@ -16,8 +16,8 @@ all registered projects, including those without cache access.
 
 The applied corporate Terraform stack exports:
 
-- `remote_cache_access_aud`: paste into `ACCESS_AUD` in `wrangler.toml`.
-- `remote_cache_project_groups`: paste into `[vars.PROJECTS]` in `wrangler.toml`.
+- `remote_cache_access_aud`: paste into `vars.ACCESS_AUD` in `wrangler.json`.
+- `remote_cache_project_groups`: paste into `vars.PROJECTS` in `wrangler.json`.
 
 Changes to flags or group names require a coordinated Worker deployment. In
 particular, disabling a project without updating the Worker map can leave it

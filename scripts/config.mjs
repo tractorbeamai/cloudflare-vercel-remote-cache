@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { parse } from "smol-toml";
 
-export const configPath = new URL("../wrangler.toml", import.meta.url);
+export const configPath = new URL("../wrangler.json", import.meta.url);
 export async function readConfig() {
-  return parse(await readFile(configPath, "utf8"));
+  return JSON.parse(await readFile(configPath, "utf8"));
 }

@@ -30,9 +30,6 @@ importers:
       prettier:
         specifier: 3.9.8
         version: 3.9.8
-      smol-toml:
-        specifier: 1.8.0
-        version: 1.8.0
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -784,10 +781,6 @@ packages:
       '@types/node':
         optional: true
 
-  smol-toml@1.8.0:
-    resolution: {integrity: sha512-kCZr2V3ch9i00x8zXRhjUNVcjG9ijES5dDudkXvUVCT5QlJNQWElSJdZqyPemffHoLNUYwOcou0Fy+ojN0uHSQ==}
-    engines: {node: '>= 18'}
-
   supports-color@10.2.2:
     resolution: {integrity: sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g==}
     engines: {node: '>=18'}
@@ -1359,8 +1352,6 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.4
       '@img/sharp-win32-x64': 0.35.4
       '@types/node': 26.6.2
-
-  smol-toml@1.8.0: {}
 
   supports-color@10.2.2: {}
 
