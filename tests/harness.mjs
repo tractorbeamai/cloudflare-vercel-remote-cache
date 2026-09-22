@@ -3,9 +3,10 @@ import { build } from "esbuild";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import { readConfig } from "../scripts/config.mjs";
 
-export async function startHarness(overrides = {}, options = {}) {
-  const config = await readConfig();
-  const compiled = await build({
+// All fixtures run the same Worker; only identities and storage need isolation.
+const fixture = Promise.all([
+  readConfig(),
+  build({
     entryPoints: ["src/index.ts"],
     bundle: true,
     write: false,
@@ -13,7 +14,11 @@ export async function startHarness(overrides = {}, options = {}) {
     platform: "neutral",
     target: "es2022",
     external: ["cloudflare:workers"],
-  });
+  }),
+]);
+
+export async function startHarness(overrides = {}, options = {}) {
+  const [config, compiled] = await fixture;
   const { privateKey, publicKey } = await generateKeyPair("RS256", {
     extractable: true,
   });
@@ -91,7 +96,6 @@ export async function startHarness(overrides = {}, options = {}) {
   const url = (await mf.ready).origin;
   const token = await sign();
   return {
-    mf,
     url,
     token,
     sign,

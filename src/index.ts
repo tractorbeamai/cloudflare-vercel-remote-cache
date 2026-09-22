@@ -6,6 +6,7 @@ import { authenticate, fail } from "./auth";
 
 type App = { Bindings: Env; Variables: { writable: boolean } };
 const app = new Hono<App>();
+const encoder = new TextEncoder();
 const hashSchema = z
   .string()
   .regex(/^[a-fA-F0-9]+$/)
@@ -184,9 +185,7 @@ app.post("/artifacts", async (c) => {
             taskDurationMs: Number(
               object.customMetadata?.["x-artifact-duration"] ?? 0,
             ),
-            ...(object.customMetadata?.["x-artifact-tag"] !== undefined
-              ? { tag: object.customMetadata["x-artifact-tag"] }
-              : {}),
+            tag: object.customMetadata?.["x-artifact-tag"],
           }
         : null,
     ]);
@@ -214,6 +213,7 @@ app.put("/artifacts/:hash", async (c) => {
   if (length > c.env.MAX_ARTIFACT_BYTES)
     fail(413, "artifact_too_large", "Artifact exceeds configured limit");
   const customMetadata: Record<string, string> = {};
+  let metadataBytes = 0;
   for (const name of metadataNames) {
     const v = c.req.header(name);
     if (v === undefined) continue;
@@ -226,14 +226,9 @@ app.put("/artifacts/:hash", async (c) => {
       fail(400, "invalid_duration", "Duration must be a nonnegative integer");
     }
     customMetadata[name] = v;
+    metadataBytes +=
+      encoder.encode(name).byteLength + encoder.encode(v).byteLength;
   }
-  const metadataBytes = Object.entries(customMetadata).reduce(
-    (total, [name, v]) =>
-      total +
-      new TextEncoder().encode(name).byteLength +
-      new TextEncoder().encode(v).byteLength,
-    0,
-  );
   if (metadataBytes > 2048)
     fail(400, "invalid_metadata", "Metadata exceeds R2 limit");
   // Atomic first-writer-wins: retries succeed without changing stored bytes or

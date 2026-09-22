@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { startHarness } from "../tests/harness.mjs";
 
 const harness = await startHarness();
@@ -21,10 +22,8 @@ try {
     ],
     { stdio: "inherit" },
   );
-  process.exitCode = await new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", (code) => resolve(code ?? 1));
-  });
+  const [code] = await once(child, "exit");
+  process.exitCode = code ?? 1;
 } finally {
   await harness.close();
 }

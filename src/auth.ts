@@ -13,7 +13,7 @@ export function fail(
 ): never {
   throw new HTTPException(status, {
     res: Response.json(
-      { code, message, error: { code, message } },
+      { code, message },
       { status, headers: { "Cache-Control": "private, no-store" } },
     ),
   });
