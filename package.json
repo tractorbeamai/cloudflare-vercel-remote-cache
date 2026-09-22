@@ -14,7 +14,7 @@
     "build": "wrangler deploy --dry-run --minify --outdir dist",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test": "vitest run",
     "test:contract": "node scripts/test-contract.mjs",
     "check": "pnpm typecheck && pnpm format:check && pnpm build && pnpm test && pnpm test:contract",
     "deploy": "wrangler deploy --minify"
@@ -25,11 +25,13 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.2.3",
     "@types/node": "26.6.2",
     "esbuild": "0.28.2",
     "miniflare": "5.20260921.0-alpha",
     "prettier": "3.9.8",
     "typescript": "7.0.2",
+    "vitest": "4.1.0",
     "wrangler": "4.136.3"
   }
 }

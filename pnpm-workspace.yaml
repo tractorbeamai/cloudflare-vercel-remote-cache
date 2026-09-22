@@ -3,3 +3,4 @@ allowBuilds:
   workerd: true
 minimumReleaseAgeExclude:
   - wrangler@4.136.3
+  - "@cloudflare/vitest-plugin@1.2.3"

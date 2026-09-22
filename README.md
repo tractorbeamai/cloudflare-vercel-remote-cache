@@ -65,8 +65,8 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Checks include TypeScript, formatting, a Wrangler dry run, local workerd/R2
-security and protocol tests, and Schemathesis against the unchanged upstream
+Checks include TypeScript, formatting, a Wrangler dry run, Vitest protocol and
+security tests in Cloudflare's Workers runtime with local R2, and Schemathesis against the unchanged upstream
 OpenAPI document. Test fixtures sign ephemeral JWTs and mock only JWKS retrieval.
 [Contract provenance and exceptions](spec/README.md) describe the coverage.
 Local tests do not establish live Access or WARP behavior.

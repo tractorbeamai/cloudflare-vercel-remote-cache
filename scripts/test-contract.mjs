@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { startHarness } from "../tests/harness.mjs";
+import { startHarness } from "./contract-harness.mjs";
 
 const harness = await startHarness();
 try {

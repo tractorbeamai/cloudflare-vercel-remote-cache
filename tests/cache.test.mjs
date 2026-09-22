@@ -1,15 +1,25 @@
-import { test, before, after } from "node:test";
+import { test, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { startHarness } from "./harness.mjs";
+import {
+  startHarness,
+  installJwksFetch,
+  clearArtifacts,
+} from "./worker-harness.mjs";
 let h;
-before(async () => {
+let restoreFetch;
+beforeAll(async () => {
+  restoreFetch = installJwksFetch();
   h = await startHarness();
 });
-after(async () => {
+beforeEach(clearArtifacts);
+afterAll(async () => {
   await h?.close();
+  restoreFetch?.();
 });
 const path = (id) => `/artifacts/${id}`;
+const binaryText = async (response) =>
+  new TextDecoder().decode(await response.arrayBuffer());
 const upload = (id, body, headers = {}) =>
   h.request(path(id), {
     method: "PUT",
@@ -63,7 +73,7 @@ test("missing, invalid, expired, wrong issuer and wrong audience tokens cannot r
     await h.sign({ aud: "another-app" }),
     await h.sign({ iss: "https://wrong.cloudflareaccess.com" }),
   ]) {
-    const r = await fetch(`${h.url}${path("a11")}?teamId=caddi`, {
+    const r = await h.rawRequest(`${path("a11")}?teamId=caddi`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     assert.equal(r.status, 401);
@@ -100,17 +110,17 @@ test("concurrent writes and retries preserve the first committed artifact", asyn
     writes.map((r) => r.status),
     [202, 202],
   );
-  const first = await (await h.request(path("a14"))).text();
+  const first = await binaryText(await h.request(path("a14")));
   assert.ok(["first", "second"].includes(first));
   await upload("a14", "replacement");
-  assert.equal(await (await h.request(path("a14"))).text(), first);
+  assert.equal(await binaryText(await h.request(path("a14"))), first);
 });
 
 test("unknown artifacts return 404 and are immediately readable after upload", async () => {
   assert.equal((await h.request(path("a15"))).status, 404);
   assert.equal((await h.request(path("a15"), { method: "HEAD" })).status, 404);
   await upload("a15", "new");
-  assert.equal(await (await h.request(path("a15"))).text(), "new");
+  assert.equal(await binaryText(await h.request(path("a15"))), "new");
 });
 
 test("malformed requests are rejected and empty binary artifacts round-trip", async () => {
@@ -165,7 +175,7 @@ test("unsupported methods return 405 and an Allow header", async () => {
 });
 
 test("Access assertion works without a bearer and absent Access config fails closed", async () => {
-  const response = await fetch(`${h.url}/artifacts/status?teamId=caddi`, {
+  const response = await h.rawRequest("/artifacts/status?teamId=caddi", {
     headers: { "Cf-Access-Jwt-Assertion": h.token },
   });
   assert.equal(response.status, 200);
@@ -289,7 +299,7 @@ test("identical hashes in different projects have separate bytes and metadata", 
       headers: { Authorization: `Bearer ${carlyleToken}`, ...init.headers },
     });
   await upload(id, "CADDi artifact", { "x-artifact-tag": "caddi-tag" });
-  assert.equal(await (await h.request(path(id))).text(), "CADDi artifact");
+  assert.equal(await binaryText(await h.request(path(id))), "CADDi artifact");
   assert.equal((await carlyle(path(id))).status, 404);
   assert.equal(
     (
@@ -311,7 +321,7 @@ test("identical hashes in different projects have separate bytes and metadata", 
     ]) {
       const response = await read(path(id));
       assert.equal(response.status, 200);
-      assert.equal(await response.text(), body);
+      assert.equal(await binaryText(response), body);
       assert.equal(response.headers.get("x-artifact-tag"), tag);
       const head = await read(path(id), { method: "HEAD" });
       assert.equal(
@@ -379,7 +389,7 @@ test("team selection is explicit, unambiguous, and cannot inject a storage path"
     "?teamId=caddi%2F..%2Fcarlyle",
     "?teamId=__proto__",
   ]) {
-    const response = await fetch(`${h.url}/artifacts/status${suffix}`, {
+    const response = await h.rawRequest(`/artifacts/status${suffix}`, {
       headers: { Authorization: `Bearer ${h.token}` },
     });
     assert.equal(response.status, 400, suffix);
@@ -394,19 +404,20 @@ test("team selection is explicit, unambiguous, and cannot inject a storage path"
   );
 });
 
-test("invalid project configuration fails closed", async () => {
-  for (const overrides of [
-    { PROJECTS: { caddi: "" } },
-    { PROJECTS: { "../caddi": "Project: CADDi" } },
-    { ACCESS_AUD: "" },
+test.each([
+  ["empty project group", { PROJECTS: { caddi: "" } }],
+  ["invalid project key", { PROJECTS: { "../caddi": "Project: CADDi" } }],
+  ["missing audience", { ACCESS_AUD: "" }],
+  [
+    "invalid service project",
     { SERVICE_PROJECTS: { "test-client.access": ["../caddi"] } },
-  ]) {
-    const broken = await startHarness(overrides);
-    try {
-      assert.equal((await broken.request("/artifacts/status")).status, 503);
-    } finally {
-      await broken.close();
-    }
+  ],
+])("%s configuration fails closed", async (_case, overrides) => {
+  const broken = await startHarness(overrides);
+  try {
+    expect((await broken.request("/artifacts/status")).status).toBe(503);
+  } finally {
+    await broken.close();
   }
 });
 
@@ -430,36 +441,37 @@ test("membership in multiple projects grants independent read and write access",
       202,
     );
     assert.equal(
-      await (
+      await binaryText(
         await h.request(route, {
           headers: { Authorization: `Bearer ${token}` },
-        })
-      ).text(),
+        }),
+      ),
       project,
     );
   }
 });
 
-test("missing, malformed, oversized and unrelated group claims never authorize", async () => {
-  for (const custom of [
-    undefined,
-    null,
-    {},
-    { groups: [] },
-    { groups: "Project: CADDi" },
-    { groups: ["Project: Carlyle"] },
-    { groups: ["Project: caddi"] },
-    { groups: ["Project: CADDi"], padding: "x".repeat(700) },
-  ]) {
-    const token = await h.sign({ custom });
-    const response = await h.request("/artifacts/status", {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "X-Groups": "Project: CADDi",
-      },
-    });
-    assert.equal(response.status, 403);
-  }
+test.each([
+  ["missing", undefined],
+  ["null", null],
+  ["empty", {}],
+  ["no memberships", { groups: [] }],
+  ["string memberships", { groups: "Project: CADDi" }],
+  ["other project", { groups: ["Project: Carlyle"] }],
+  ["wrong case", { groups: ["Project: caddi"] }],
+  ["oversized", { groups: ["Project: CADDi"], padding: "x".repeat(700) }],
+])("%s group claim does not authorize", async (_case, custom) => {
+  const token = await h.sign({ custom });
+  const response = await h.request("/artifacts/status", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-Groups": "Project: CADDi",
+    },
+  });
+  expect(response.status).toBe(403);
+});
+
+test("organization tokens do not authorize", async () => {
   const token = await h.sign({ type: "org" });
   assert.equal(
     (
