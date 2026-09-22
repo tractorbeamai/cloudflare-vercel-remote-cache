@@ -1,5 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
+  "account_id": "b534f6f9c114635cacb3cfd15861c516",
   "name": "tractorbeam-turbo-cache-nonprod",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-22",
@@ -14,10 +15,7 @@
   },
   "vars": {
     "ACCESS_ISSUER": "",
-    "ACCESS_READ_AUD": "",
-    "ACCESS_WRITE_AUD": "",
-    "TEAM_ID": "team_tractorbeam",
-    "TEAM_SLUG": "tractorbeam",
+    "PROJECT_ACCESS": {},
     "MAX_ARTIFACT_BYTES": 67108864,
     "CACHE_TTL_SECONDS": 300,
   },

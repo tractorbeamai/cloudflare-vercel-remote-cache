@@ -63,7 +63,7 @@ test("missing, invalid, expired, wrong issuer and wrong audience tokens cannot r
     await h.sign({ aud: "another-app" }),
     await h.sign({ iss: "https://wrong.cloudflareaccess.com" }),
   ]) {
-    const r = await fetch(`${h.url}${path("a11")}`, {
+    const r = await fetch(`${h.url}${path("a11")}?teamId=caddi`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     assert.equal(r.status, 401);
@@ -79,7 +79,7 @@ test("missing, invalid, expired, wrong issuer and wrong audience tokens cannot r
   );
 });
 
-test("read audience can read but cannot upload; team selectors cannot escape configured namespace", async () => {
+test("read audience can read but cannot upload; team selectors require project permission", async () => {
   const token = await h.sign({ aud: "read-audience" });
   await upload("a12", "authorized");
   assert.equal(
@@ -95,23 +95,15 @@ test("read audience can read but cannot upload; team selectors cannot escape con
       .status,
     403,
   );
-  for (const suffix of [
-    "?teamId=other",
-    "?slug=other",
-    "?teamId=team_tractorbeam&slug=other",
-  ]) {
+  for (const suffix of ["?teamId=other", "?slug=other"]) {
     assert.equal((await h.request(path("a12") + suffix)).status, 403);
     assert.equal((await upload("a12" + suffix, "blocked")).status, 403);
   }
   assert.equal(
-    (await h.request(path("a12") + "?teamId=team_tractorbeam&teamId=other"))
-      .status,
+    (await h.request(path("a12") + "?teamId=caddi&teamId=other")).status,
     400,
   );
-  assert.equal(
-    (await h.request(path("a12") + "?slug=tractorbeam")).status,
-    200,
-  );
+  assert.equal((await h.request(path("a12") + "?slug=caddi")).status, 200);
 });
 
 test("concurrent writes and retries preserve the first committed artifact", async () => {
@@ -187,11 +179,11 @@ test("unsupported methods return 405 and an Allow header", async () => {
 });
 
 test("Access assertion works without a bearer and absent Access config fails closed", async () => {
-  const response = await fetch(`${h.url}/artifacts/status`, {
+  const response = await fetch(`${h.url}/artifacts/status?teamId=caddi`, {
     headers: { "Cf-Access-Jwt-Assertion": h.token },
   });
   assert.equal(response.status, 200);
-  const unconfigured = await startHarness({ ACCESS_READ_AUD: "" });
+  const unconfigured = await startHarness({ PROJECT_ACCESS: {} });
   try {
     assert.equal((await unconfigured.request("/artifacts/status")).status, 503);
   } finally {
@@ -297,5 +289,176 @@ test("binary artifacts retain exact bytes across boundary sizes", async () => {
         method === "HEAD" ? Buffer.alloc(0) : body,
       );
     }
+  }
+});
+
+test("identical hashes in different projects have separate bytes, metadata, and cache keys", async () => {
+  const id = "b001";
+  const carlyleToken = await h.sign({ aud: "carlyle-write" });
+  const carlyle = (route, init = {}) =>
+    h.request(`${route}?teamId=carlyle`, {
+      ...init,
+      headers: { Authorization: `Bearer ${carlyleToken}`, ...init.headers },
+    });
+  await upload(id, "CADDi artifact", { "x-artifact-tag": "caddi-tag" });
+  assert.equal(await (await h.request(path(id))).text(), "CADDi artifact");
+  assert.equal((await carlyle(path(id))).status, 404);
+  assert.equal(
+    (
+      await carlyle(path(id), {
+        method: "PUT",
+        body: "Carlyle artifact",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "x-artifact-tag": "carlyle-tag",
+        },
+      })
+    ).status,
+    202,
+  );
+  for (let i = 0; i < 2; i++) {
+    for (const [read, body, tag] of [
+      [(route, init) => h.request(route, init), "CADDi artifact", "caddi-tag"],
+      [carlyle, "Carlyle artifact", "carlyle-tag"],
+    ]) {
+      const response = await read(path(id));
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), body);
+      assert.equal(response.headers.get("x-artifact-tag"), tag);
+      const head = await read(path(id), { method: "HEAD" });
+      assert.equal(
+        head.headers.get("Content-Length"),
+        String(Buffer.byteLength(body)),
+      );
+      assert.equal(head.headers.get("x-artifact-tag"), tag);
+      const batch = await read("/artifacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hashes: [id] }),
+      });
+      assert.deepEqual(await batch.json(), {
+        [id]: { size: Buffer.byteLength(body), tag, taskDurationMs: 0 },
+      });
+    }
+  }
+});
+
+test("project audiences deny cross-project operations even after cache reads", async () => {
+  await upload("b002", "CADDi artifact");
+  const writer = await h.sign({ aud: "carlyle-write" });
+  const auth = { Authorization: `Bearer ${writer}` };
+  await h.request("/artifacts/b002?teamId=carlyle", {
+    method: "PUT",
+    body: "Carlyle artifact",
+    headers: { ...auth, "Content-Type": "application/octet-stream" },
+  });
+  assert.equal(
+    (await h.request("/artifacts/b002?teamId=carlyle", { headers: auth }))
+      .status,
+    200,
+  );
+  for (const [route, method, body] of [
+    ["/artifacts/b002", "GET"],
+    ["/artifacts/b002", "HEAD"],
+    ["/artifacts/b002", "PUT", "overwrite"],
+    ["/artifacts", "POST", '{"hashes":["b002"]}'],
+    ["/artifacts/events", "POST", "[]"],
+    ["/artifacts/status", "GET"],
+  ]) {
+    const response = await h.request(`${route}?teamId=carlyle`, {
+      method,
+      body,
+    });
+    assert.equal(response.status, 403, `${method} ${route}`);
+  }
+  const token = await h.sign({ sub: "", common_name: "caddi-ci.access" });
+  assert.equal(
+    (
+      await h.request("/artifacts/b002?teamId=carlyle", {
+        headers: { Authorization: `Bearer ${token}`, "X-Team-Id": "carlyle" },
+      })
+    ).status,
+    403,
+  );
+  const readOnly = await h.sign({ aud: "carlyle-read" });
+  assert.equal(
+    (
+      await h.request("/artifacts/b002?teamId=carlyle", {
+        method: "PUT",
+        body: "blocked",
+        headers: { Authorization: `Bearer ${readOnly}` },
+      })
+    ).status,
+    403,
+  );
+  const allowed = await h.request("/artifacts/b002?teamId=carlyle", {
+    headers: { Authorization: `Bearer ${readOnly}` },
+  });
+  assert.equal(await allowed.text(), "Carlyle artifact");
+});
+
+test("team selection is explicit, unambiguous, and cannot inject a storage path", async () => {
+  for (const suffix of [
+    "",
+    "?teamId=",
+    "?teamId=caddi&slug=carlyle",
+    "?slug=caddi&slug=caddi",
+    "?teamId=caddi%2F..%2Fcarlyle",
+    "?teamId=__proto__",
+  ]) {
+    const response = await fetch(`${h.url}/artifacts/status${suffix}`, {
+      headers: { Authorization: `Bearer ${h.token}` },
+    });
+    assert.equal(response.status, 400, suffix);
+  }
+  assert.equal(
+    (await h.request("/artifacts/status?teamId=constructor")).status,
+    403,
+  );
+  assert.equal(
+    (await h.request("/artifacts/status?teamId=caddi&slug=caddi")).status,
+    200,
+  );
+});
+
+test("misconfigured project audience maps fail closed", async () => {
+  for (const projects of [
+    { caddi: { read: "read-audience", write: "" } },
+    {
+      caddi: { read: "read-audience", write: "write-audience" },
+      carlyle: { read: "write-audience", write: "carlyle-write" },
+    },
+    { "../caddi": { read: "read-audience", write: "write-audience" } },
+  ]) {
+    const broken = await startHarness({ PROJECT_ACCESS: projects });
+    try {
+      assert.equal((await broken.request("/artifacts/status")).status, 503);
+    } finally {
+      await broken.close();
+    }
+  }
+});
+
+test("one project application can grant both read and write", async () => {
+  const shared = await startHarness({
+    PROJECT_ACCESS: {
+      caddi: { read: "write-audience", write: "write-audience" },
+    },
+  });
+  try {
+    assert.equal((await shared.request("/artifacts/status")).status, 200);
+    assert.equal(
+      (
+        await shared.request("/artifacts/c01", {
+          method: "PUT",
+          body: "x",
+          headers: { "Content-Type": "application/octet-stream" },
+        })
+      ).status,
+      202,
+    );
+    assert.equal(await (await shared.request("/artifacts/c01")).text(), "x");
+  } finally {
+    await shared.close();
   }
 });

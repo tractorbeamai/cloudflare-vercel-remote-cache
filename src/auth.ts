@@ -1,5 +1,15 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
+
+export const teamIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+  .max(64);
+const projectAccessSchema = z.record(
+  teamIdSchema,
+  z.object({ read: z.string().min(1), write: z.string().min(1) }),
+);
 
 // Only public verification keys are cached. Credentials and identities are never
 // shared between requests. A config change replaces the resolver.
@@ -22,14 +32,29 @@ export function fail(
 export async function authenticate(
   request: Request,
   env: Env,
-): Promise<{ subject: string; writable: boolean }> {
+): Promise<{ subject: string; writable: boolean; teamId: string }> {
   const issuer = env.ACCESS_ISSUER;
+  const projects = projectAccessSchema.safeParse(env.PROJECT_ACCESS);
   if (
     !/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(issuer) ||
-    !env.ACCESS_READ_AUD ||
-    !env.ACCESS_WRITE_AUD
+    !projects.success ||
+    !Object.keys(projects.data).length
   ) {
-    fail(503, "auth_unconfigured", "Access configuration is required");
+    fail(503, "auth_unconfigured", "Project Access configuration is required");
+  }
+  // One Access app may grant read/write for one project, never multiple projects.
+  const audienceOwners = new Map<string, string>();
+  for (const [teamId, access] of Object.entries(projects.data)) {
+    for (const audience of [access.read, access.write]) {
+      const owner = audienceOwners.get(audience);
+      if (owner !== undefined && owner !== teamId)
+        fail(
+          503,
+          "auth_unconfigured",
+          "Access audiences must be project-specific",
+        );
+      audienceOwners.set(audience, teamId);
+    }
   }
   const assertion = request.headers.get("Cf-Access-Jwt-Assertion");
   const bearer = request.headers
@@ -44,24 +69,39 @@ export async function authenticate(
       keys: createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`)),
     };
   }
-  try {
-    const { payload } = await jwtVerify(token, keyCache.keys, {
-      issuer,
-      audience: [env.ACCESS_READ_AUD, env.ACCESS_WRITE_AUD],
-      algorithms: ["RS256"],
-      requiredClaims: ["exp", "iat", "sub"],
-    });
-    const subject = payload.sub
-      ? `user:${payload.sub}`
-      : payload.sub === "" &&
-          typeof payload.common_name === "string" &&
-          payload.common_name.endsWith(".access")
-        ? `service:${payload.common_name}`
-        : undefined;
-    if (!subject) fail(401, "unauthorized", "Invalid Access identity");
-    const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    return { subject, writable: audiences.includes(env.ACCESS_WRITE_AUD) };
-  } catch {
-    fail(401, "unauthorized", "A valid Access token is required");
-  }
+  const { payload } = await jwtVerify(token, keyCache.keys, {
+    issuer,
+    audience: [...audienceOwners.keys()],
+    algorithms: ["RS256"],
+    requiredClaims: ["exp", "iat", "sub"],
+  }).catch(() => fail(401, "unauthorized", "A valid Access token is required"));
+  const subject = payload.sub
+    ? `user:${payload.sub}`
+    : payload.sub === "" &&
+        typeof payload.common_name === "string" &&
+        payload.common_name.endsWith(".access")
+      ? `service:${payload.common_name}`
+      : undefined;
+  if (!subject) fail(401, "unauthorized", "Invalid Access identity");
+
+  const query = new URL(request.url).searchParams;
+  const ids = query.getAll("teamId");
+  const slugs = query.getAll("slug");
+  if (ids.length > 1 || slugs.length > 1)
+    fail(400, "invalid_query", "Repeated team selector");
+  if (ids.length && slugs.length && ids[0] !== slugs[0])
+    fail(400, "invalid_query", "Team selectors must identify the same project");
+  const teamId = ids[0] ?? slugs[0];
+  if (!teamId || !teamIdSchema.safeParse(teamId).success)
+    fail(400, "invalid_query", "A project teamId or slug is required");
+  const access = Object.hasOwn(projects.data, teamId)
+    ? projects.data[teamId]
+    : undefined;
+  const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (
+    !access ||
+    ![access.read, access.write].some((aud) => audiences.includes(aud))
+  )
+    fail(403, "forbidden", "Project is not authorized");
+  return { subject, teamId, writable: audiences.includes(access.write) };
 }

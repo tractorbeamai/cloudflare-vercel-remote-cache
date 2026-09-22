@@ -6,8 +6,10 @@ if (
   !/^[a-f0-9]{32}$/.test(config.account_id ?? "") ||
   !config.routes?.length ||
   !config.vars.ACCESS_ISSUER ||
-  !config.vars.ACCESS_READ_AUD ||
-  !config.vars.ACCESS_WRITE_AUD
+  !Object.keys(config.vars.PROJECT_ACCESS ?? {}).length ||
+  Object.values(config.vars.PROJECT_ACCESS).some(
+    (project) => !project.read || !project.write,
+  )
 ) {
   throw new Error(
     "Configure the verified nonprod account_id, custom-domain route, Access issuer and audiences before deployment. See README.md.",

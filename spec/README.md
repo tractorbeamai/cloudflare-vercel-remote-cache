@@ -12,20 +12,20 @@ The routes match the schema at `/artifacts/...`; there is no `/v8` alias.
 
 `schemathesis.toml` keeps the test inputs and exceptions visible:
 
-- Team selectors and authorization use the local fixture. Credential generation
+- Team selectors and authorization use the local CADDi fixture. Credential generation
   and undeclared extra parameters are disabled; dedicated Node tests exercise
   invalid credentials, team isolation and malformed requests.
 - Upload framing uses a configured Content-Length, recalculated by the HTTP
   client for nonempty bodies. PUT generates positive cases only because
   negative framing probes can fail in Miniflare before reaching the Worker.
   Other operations retain positive and negative generation; Node tests cover
-  malformed uploads.
+  malformed uploads and cross-project authorization.
 - HEAD skips JSON response-body validation because the upstream shared error
   schema requires a body that HTTP HEAD forbids. Other HEAD checks remain enabled.
 - PUT/POST positive acceptance allows 400 for deployment resource limits absent
   from the upstream schema. This means the CLI alone cannot prove valid writes
   succeed. Node tests assert successful uploads, byte-for-byte reads, metadata,
-  batch lookups, first-writer-wins, and the resource limits independently.
+  batch lookups, per-project first-writer-wins, and the resource limits independently.
 
 All six operations run coverage and fuzzing, with up to 60 fuzzing examples per
 operation. No response statuses are added to the upstream schema. Server errors,

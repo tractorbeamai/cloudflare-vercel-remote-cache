@@ -1,7 +1,7 @@
 # Deployment inputs, not a rewritten OpenAPI document.
 [parameters]
-"query.teamId" = "team_tractorbeam"
-"query.slug" = "tractorbeam"
+"query.teamId" = "caddi"
+"query.slug" = "caddi"
 
 [generation]
 max-examples = 60

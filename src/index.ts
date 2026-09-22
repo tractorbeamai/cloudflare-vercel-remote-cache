@@ -2,9 +2,9 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { authenticate, fail } from "./auth";
+import { authenticate, fail, teamIdSchema } from "./auth";
 
-type App = { Bindings: Env; Variables: { writable: boolean } };
+type App = { Bindings: Env; Variables: { writable: boolean; teamId: string } };
 const app = new Hono<App>();
 const encoder = new TextEncoder();
 const hashSchema = z
@@ -53,20 +53,7 @@ app.use("*", async (c, next) => {
   const identity = await authenticate(c.req.raw, c.env);
   c.set("writable", identity.writable);
   const url = new URL(c.req.url);
-  for (const [param, allowed] of [
-    ["teamId", c.env.TEAM_ID],
-    ["slug", c.env.TEAM_SLUG],
-  ] as const) {
-    const values = url.searchParams.getAll(param);
-    if (values.length > 1) fail(400, "invalid_query", "Repeated team selector");
-    if (
-      values.length &&
-      !(param === "slug" ? [allowed, c.env.TEAM_ID] : [allowed]).includes(
-        values[0],
-      )
-    )
-      fail(403, "forbidden", "Team is not authorized");
-  }
+  c.set("teamId", identity.teamId);
   const ci = c.req.header("x-artifact-client-ci");
   const interactive = c.req.header("x-artifact-client-interactive");
   if (
@@ -75,7 +62,9 @@ app.use("*", async (c, next) => {
   ) {
     fail(400, "invalid_header", "Invalid client metadata");
   }
-  const limited = await c.env.REQUEST_LIMITER.limit({ key: identity.subject });
+  const limited = await c.env.REQUEST_LIMITER.limit({
+    key: `${identity.teamId}:${identity.subject}`,
+  });
   if (!limited.success) fail(429, "rate_limited", "Request limit exceeded");
   const methods =
     url.pathname === "/artifacts/status"
@@ -112,9 +101,8 @@ function hash(value: string): string {
     );
   return result.data;
 }
-function key(env: Env, value: string): string {
-  // The namespace is configuration, never a caller-controlled path component.
-  return `${env.TEAM_ID}/${value}`;
+function key(teamId: string, value: string): string {
+  return `${teamId}/${value}`;
 }
 function headers(object: R2Object): Headers {
   const result = new Headers({
@@ -176,7 +164,7 @@ app.post("/artifacts", async (c) => {
   const entries: [string, unknown][] = [];
   // Bound fan-out and resource usage, including repeated hashes.
   for (const value of new Set(parsed.data.hashes)) {
-    const object = await c.env.ARTIFACTS.head(key(c.env, value));
+    const object = await c.env.ARTIFACTS.head(key(c.get("teamId"), value));
     entries.push([
       value,
       object
@@ -234,7 +222,7 @@ app.put("/artifacts/:hash", async (c) => {
   // Atomic first-writer-wins: retries succeed without changing stored bytes or
   // metadata. Cached copies stay valid even when writers race for the same hash.
   await c.env.ARTIFACTS.put(
-    key(c.env, value),
+    key(c.get("teamId"), value),
     c.req.raw.body ?? new Uint8Array(),
     {
       onlyIf: { etagDoesNotMatch: "*" },
@@ -242,33 +230,41 @@ app.put("/artifacts/:hash", async (c) => {
     },
   );
   const url = new URL(`/artifacts/${value}`, c.req.url);
-  url.searchParams.set("teamId", c.env.TEAM_ID);
+  url.searchParams.set("teamId", c.get("teamId"));
   return c.json({ urls: [url.toString()] }, 202);
 });
 app.on(["GET", "HEAD"], "/artifacts/:hash", async (c) => {
   const value = hash(c.req.param("hash"));
   if (c.req.method === "HEAD") {
-    const object = await c.env.ARTIFACTS.head(key(c.env, value));
+    const object = await c.env.ARTIFACTS.head(key(c.get("teamId"), value));
     if (!object) fail(404, "not_found", "Artifact not found");
     return new Response(null, { headers: headers(object) });
   }
   // Construct a fresh internal request: client cookies, authorization, ranges,
   // conditionals and arbitrary query parameters must not influence shared cache.
   return c.executionCtx.exports.ArtifactReader.fetch(
-    new Request(`https://artifacts.internal/${value}`),
+    new Request(`https://artifacts.internal/${key(c.get("teamId"), value)}`),
   );
 });
 
 export class ArtifactReader extends WorkerEntrypoint<Env> {
   async fetch(request: Request): Promise<Response> {
-    const value = new URL(request.url).pathname.slice(1);
-    if (request.method !== "GET" || !hashSchema.safeParse(value).success) {
+    const [, teamId, value, ...extra] = new URL(request.url).pathname.split(
+      "/",
+    );
+    if (
+      request.method !== "GET" ||
+      extra.length ||
+      !teamIdSchema.safeParse(teamId).success ||
+      !Object.hasOwn(this.env.PROJECT_ACCESS, teamId) ||
+      !hashSchema.safeParse(value).success
+    ) {
       return new Response(null, {
         status: 400,
         headers: { "Cache-Control": "no-store" },
       });
     }
-    const object = await this.env.ARTIFACTS.get(key(this.env, value));
+    const object = await this.env.ARTIFACTS.get(key(teamId, value));
     if (!object)
       return Response.json(
         { code: "not_found", message: "Artifact not found" },

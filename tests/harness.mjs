@@ -41,8 +41,10 @@ export async function startHarness(overrides = {}, options = {}) {
   const bindings = {
     ...config.vars,
     ACCESS_ISSUER: issuer,
-    ACCESS_READ_AUD: "read-audience",
-    ACCESS_WRITE_AUD: "write-audience",
+    PROJECT_ACCESS: {
+      caddi: { read: "read-audience", write: "write-audience" },
+      carlyle: { read: "carlyle-read", write: "carlyle-write" },
+    },
     ...overrides,
   };
   const mf = new Miniflare({
@@ -100,10 +102,17 @@ export async function startHarness(overrides = {}, options = {}) {
     token,
     sign,
     close: () => mf.dispose(),
-    request: (path, init = {}) =>
-      fetch(`${url}${path}`, {
+    request: (path, init = {}) => {
+      const target = new URL(path, url);
+      if (
+        !target.searchParams.has("teamId") &&
+        !target.searchParams.has("slug")
+      )
+        target.searchParams.set("teamId", "caddi");
+      return fetch(target, {
         ...init,
         headers: { Authorization: `Bearer ${token}`, ...init.headers },
-      }),
+      });
+    },
   };
 }
