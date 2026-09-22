@@ -30,20 +30,26 @@ export async function startHarness(overrides = {}, options = {}) {
   };
   const issuer = "https://test.cloudflareaccess.com";
   const sign = (claims = {}) =>
-    new SignJWT({ ...claims })
+    new SignJWT({
+      type: "app",
+      custom: { groups: ["Project: CADDi"] },
+      ...claims,
+    })
       .setProtectedHeader({ alg: "RS256", kid: "test-key" })
       .setIssuer(claims.iss ?? issuer)
       .setSubject(claims.sub ?? "test-user")
-      .setAudience(claims.aud ?? "caddi-audience")
+      .setAudience(claims.aud ?? "cache-audience")
       .setIssuedAt()
       .setExpirationTime(claims.exp ?? "1h")
       .sign(privateKey);
   const bindings = {
     ...config.vars,
     ACCESS_ISSUER: issuer,
-    PROJECT_ACCESS: {
-      caddi: "caddi-audience",
-      carlyle: "carlyle-audience",
+    ACCESS_AUD: "cache-audience",
+    PROJECTS: { caddi: "Project: CADDi", carlyle: "Project: Carlyle" },
+    SERVICE_PROJECTS: {
+      "test-client.access": ["caddi"],
+      "caddi-ci.access": ["caddi"],
     },
     ...overrides,
   };

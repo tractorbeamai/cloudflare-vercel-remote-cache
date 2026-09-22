@@ -1,0 +1,11 @@
+{
+  "name": "Tractorbeam remote cache",
+  "type": "self_hosted",
+  "destinations": [{ "type": "public", "uri": "*.cache.tractorbeam.tools" }],
+  "allowed_idps": ["85913a1e-a700-429d-9a13-81ce2864384b"],
+  "auto_redirect_to_identity": true,
+  "allow_authenticate_via_warp": true,
+  "app_launcher_visible": false,
+  "session_duration": "1h",
+  "http_only_cookie_attribute": true
+}

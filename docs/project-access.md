@@ -1,69 +1,80 @@
 # Project authorization
 
-`teamId` is the key in the infra project registry, not an AWS account, Okta group
-ID, or GitHub team ID. Infra already derives a GitHub team `proj-<key>` and an
-Okta group `Project: <display_name or name>` from each project. Membership stays
-in Okta. The cache uses that same project boundary.
+The corporate account (`74bf2f1c3362ea5612cf0795fa1c78aa`) owns the cache Worker,
+private R2 bucket and single Access application. Its issuer is
+`https://tractorbeamai.cloudflareaccess.com`, the existing workforce/WARP organization.
+There is no corporate-to-nonprod identity handoff.
 
-Examples from current infra:
+## Shared identity configuration
 
-| teamId            | Okta group                   | Cache hostname                            |
-| ----------------- | ---------------------------- | ----------------------------------------- |
-| caddi             | Project: CADDi               | caddi.cache.tractorbeam.tools             |
-| carlyle           | Project: Carlyle             | carlyle.cache.tractorbeam.tools           |
-| linden-investment | Project: Linden (Investment) | linden-investment.cache.tractorbeam.tools |
-| linden-tech       | Project: Linden (Tech)       | linden-tech.cache.tractorbeam.tools       |
+Infra owns two shared integration changes:
 
-The companion infra change generates Access applications for opted-in project keys,
-using the native Okta group selector and the existing nonprod Okta provider.
-It does not recreate groups, store users, or broaden Cloudflare One enrollment.
-Each application's audience grants access to exactly one cache project.
+- `identity/okta/apps.tf`: the corporate Cloudflare One OAuth app emits `groups`,
+  filtered with `STARTS_WITH "Project: "`. Its existing SSWS-authenticated Okta
+  provider supports the app-level `groups_claim` block. Provider 7 marks that
+  block deprecated; its suggested replacement requires a custom authorization
+  server. This change keeps the existing org authorization server.
+- `cloudflare/access.tf`: the existing native Okta IdP forwards `groups` as a
+  custom claim. Its credentials, assignment rules, and device-trust policies remain
+  managed by infra.
 
-Copy the applied `remote_cache_project_access` output into the Worker's
-`PROJECT_ACCESS` binding. Its shape is:
+The application token must contain an array at `custom.groups`, for example:
 
 ```json
-{
-  "caddi": "<CADDi app AUD>",
-  "carlyle": "<Carlyle app AUD>"
-}
+{ "custom": { "groups": ["Project: CADDi", "Project: Linden (Tech)"] } }
 ```
 
-The Worker verifies the issuer, signature, expiry, audience and identity before
-resolving `teamId`/`slug`. A valid token for another configured project receives 403. An unknown audience receives 401. Missing or conflicting selectors receive
-400 after authentication. No caller-provided group or team header grants access.
-The R2 prefix uses the authorized project key. The same hash
-may contain different bytes in different projects without a collision.
+This is a signed authorization input, not a header supplied by the client. The
+Worker verifies the token before reading claims. An absent group array, unrelated
+group, or oversized custom object denies access. WARP authentication must be tested
+with a fresh managed-device session after the shared integration is applied.
 
-Application removal and Worker configuration removal should be coordinated.
-Only projects with `remote_cache: true` in the registry receive cache Access
-applications and appear in the Worker configuration output. Omitted or false
-disables the project cache. Disabling the flag or removing a project removes its
-Access application on apply;
-remove its AUD from the Worker binding too. Existing signed JWTs can otherwise
-remain locally valid until expiration. Artifacts expire through R2 lifecycle.
+## Project registry
 
-## Rollout boundaries
+`remote_cache: true` in infra's `data/projects.json` enables a namespace. The
+Worker repo syncs project keys to exact Okta group names into `wrangler.toml`:
 
-- Infra owns R2 and Access policies; the Worker repository owns application code
-  and bindings. Keep DNS authoritative in Route 53. The new Access applications
-  do not themselves publish DNS or attach Worker domains.
-- Nonprod uses its own Okta client and Access organization. Verify native Okta
-  group resolution there before attaching routes. Groups are not automatically
-  included in Access application JWTs, and this design does not depend on them.
-- Corporate WARP enrollment is not proof of a nonprod Access session. Verify the
-  supported authentication path with an actual managed device. An Access Bypass
-  policy is not a substitute.
-- No broad CI exception is created. A service identity must be admitted by the
-  specific project application; its signed AUD then follows the same checks.
-- No public bucket hostname or S3 credential is required. R2 account admins and
-  pre-existing broad API tokens remain outside the Worker's authorization boundary.
+```toml
+[vars.PROJECTS]
+caddi = "Project: CADDi"
+linden-tech = "Project: Linden (Tech)"
+```
 
-## Sources inspected
+The registry does not copy users or memberships. Missing/false opts out. Deployment
+reads the main-branch registry, so unmerged edits cannot enable access. A flag or
+group-name change requires redeploying the Worker; changing the registry alone does
+not update a running deployment. JWT membership changes require session refresh.
 
-- [Infra project registry](https://github.com/tractorbeamai/infra/blob/acfe55d96289d88230356af88453da24ee719b97/data/projects.json)
-- [Okta project groups](https://github.com/tractorbeamai/infra/blob/acfe55d96289d88230356af88453da24ee719b97/identity/okta/groups.tf)
-- [GitHub project team synchronization](https://github.com/tractorbeamai/infra/blob/acfe55d96289d88230356af88453da24ee719b97/github/team_sync.tf)
-- [Nonprod account boundary](https://github.com/tractorbeamai/infra/blob/acfe55d96289d88230356af88453da24ee719b97/cloudflare/nonprod/account.tf)
-- [Nonprod Okta integration](https://github.com/tractorbeamai/infra/blob/acfe55d96289d88230356af88453da24ee719b97/cloudflare/nonprod/access.tf)
-- [Cloudflare application token and group-claim behavior](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)
+Infra and the sync command check the combined size of all registered project
+groups, including disabled projects, because a user may belong to all of them.
+The 700-byte/64-group bound leaves headroom below Access's approximate 1 KB custom
+claim limit. The Worker also rejects custom claims larger than 700 UTF-8 bytes.
+If the project set outgrows this limit, change the authorization design rather than
+silently falling back to mere application admission.
+
+## Service identities
+
+Service-token JWTs have an empty `sub` and a signed `common_name` containing the
+client ID. They do not inherit human groups. The Worker requires an exact entry in
+`SERVICE_PROJECTS`, checks the requested project is still enabled, and grants both
+reads and writes only to those projects. An empty map allows no service identities.
+Setup resolves the configured client IDs to existing Access token IDs and includes
+only those in a Service Auth policy. It does not create or handle token secrets.
+
+## Ownership and rollout
+
+All cache resources and settings live in this repository. Wrangler manages Worker
+code, routes and bindings; setup uses the Access API and Wrangler's R2 commands
+for features outside the TOML schema. The infra PR creates no cache bucket or
+per-project Access applications. The global WARP authentication setting is not
+changed; the cache application enables it explicitly.
+
+The intended wildcard hostname still needs corporate zone/proxy/TLS routing and
+Route 53 DNS. Verify live WARP claim delivery and cross-project denial before
+publishing traffic. A local JWT fixture establishes the Worker behavior, not the
+external IdP or WARP integration.
+
+Sources: [project registry](https://github.com/tractorbeamai/infra/blob/main/data/projects.json),
+[Okta project groups](https://github.com/tractorbeamai/infra/blob/main/identity/okta/groups.tf),
+[shared identity changes](https://github.com/tractorbeamai/infra/pull/1541), and
+[Cloudflare application-token documentation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/).

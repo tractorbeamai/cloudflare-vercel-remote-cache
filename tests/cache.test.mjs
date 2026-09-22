@@ -169,7 +169,7 @@ test("Access assertion works without a bearer and absent Access config fails clo
     headers: { "Cf-Access-Jwt-Assertion": h.token },
   });
   assert.equal(response.status, 200);
-  const unconfigured = await startHarness({ PROJECT_ACCESS: {} });
+  const unconfigured = await startHarness({ PROJECTS: {} });
   try {
     assert.equal((await unconfigured.request("/artifacts/status")).status, 503);
   } finally {
@@ -280,7 +280,9 @@ test("binary artifacts retain exact bytes across boundary sizes", async () => {
 
 test("identical hashes in different projects have separate bytes and metadata", async () => {
   const id = "b001";
-  const carlyleToken = await h.sign({ aud: "carlyle-audience" });
+  const carlyleToken = await h.sign({
+    custom: { groups: ["Project: Carlyle"] },
+  });
   const carlyle = (route, init = {}) =>
     h.request(`${route}?teamId=carlyle`, {
       ...init,
@@ -329,9 +331,9 @@ test("identical hashes in different projects have separate bytes and metadata", 
   }
 });
 
-test("project audiences deny cross-project operations after successful reads", async () => {
+test("project claims deny cross-project operations after successful reads", async () => {
   await upload("b002", "CADDi artifact");
-  const writer = await h.sign({ aud: "carlyle-audience" });
+  const writer = await h.sign({ custom: { groups: ["Project: Carlyle"] } });
   const auth = { Authorization: `Bearer ${writer}` };
   await h.request("/artifacts/b002?teamId=carlyle", {
     method: "PUT",
@@ -392,16 +394,14 @@ test("team selection is explicit, unambiguous, and cannot inject a storage path"
   );
 });
 
-test("misconfigured project audience maps fail closed", async () => {
-  for (const projects of [
-    { caddi: "" },
-    {
-      caddi: "caddi-audience",
-      carlyle: "caddi-audience",
-    },
-    { "../caddi": "caddi-audience" },
+test("invalid project configuration fails closed", async () => {
+  for (const overrides of [
+    { PROJECTS: { caddi: "" } },
+    { PROJECTS: { "../caddi": "Project: CADDi" } },
+    { ACCESS_AUD: "" },
+    { SERVICE_PROJECTS: { "test-client.access": ["../caddi"] } },
   ]) {
-    const broken = await startHarness({ PROJECT_ACCESS: projects });
+    const broken = await startHarness(overrides);
     try {
       assert.equal((await broken.request("/artifacts/status")).status, 503);
     } finally {
@@ -410,26 +410,94 @@ test("misconfigured project audience maps fail closed", async () => {
   }
 });
 
-test("one project application can grant both read and write", async () => {
-  const shared = await startHarness({
-    PROJECT_ACCESS: {
-      caddi: "caddi-audience",
-    },
+test("membership in multiple projects grants independent read and write access", async () => {
+  const token = await h.sign({
+    custom: { groups: ["Project: CADDi", "Project: Carlyle"] },
   });
-  try {
-    assert.equal((await shared.request("/artifacts/status")).status, 200);
+  for (const project of ["caddi", "carlyle"]) {
+    const route = `/artifacts/c01?teamId=${project}`;
     assert.equal(
       (
-        await shared.request("/artifacts/c01", {
+        await h.request(route, {
           method: "PUT",
-          body: "x",
-          headers: { "Content-Type": "application/octet-stream" },
+          body: project,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/octet-stream",
+          },
         })
       ).status,
       202,
     );
-    assert.equal(await (await shared.request("/artifacts/c01")).text(), "x");
+    assert.equal(
+      await (
+        await h.request(route, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).text(),
+      project,
+    );
+  }
+});
+
+test("missing, malformed, oversized and unrelated group claims never authorize", async () => {
+  for (const custom of [
+    undefined,
+    null,
+    {},
+    { groups: [] },
+    { groups: "Project: CADDi" },
+    { groups: ["Project: Carlyle"] },
+    { groups: ["Project: caddi"] },
+    { groups: ["Project: CADDi"], padding: "x".repeat(700) },
+  ]) {
+    const token = await h.sign({ custom });
+    const response = await h.request("/artifacts/status", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-Groups": "Project: CADDi",
+      },
+    });
+    assert.equal(response.status, 403);
+  }
+  const token = await h.sign({ type: "org" });
+  assert.equal(
+    (
+      await h.request("/artifacts/status", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    ).status,
+    401,
+  );
+});
+
+test("service tokens need an explicit mapping even if they contain group claims", async () => {
+  const token = await h.sign({ sub: "", common_name: "unmapped.access" });
+  assert.equal(
+    (
+      await h.request("/artifacts/status", {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    ).status,
+    403,
+  );
+  const disabled = await startHarness({
+    PROJECTS: { carlyle: "Project: Carlyle" },
+  });
+  try {
+    const token = await disabled.sign({
+      sub: "",
+      common_name: "test-client.access",
+    });
+    assert.equal(
+      (
+        await disabled.request("/artifacts/status", {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).status,
+      403,
+    );
   } finally {
-    await shared.close();
+    await disabled.close();
   }
 });

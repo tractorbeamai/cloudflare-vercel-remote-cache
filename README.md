@@ -1,148 +1,169 @@
 # Cloudflare-native Turborepo remote cache
 
-Hono on Cloudflare Workers with private R2 storage and Cloudflare Access authentication. No Containers, KV, public R2
-endpoint, or shared static cache password.
-
-## Request path
+Hono on Cloudflare Workers with private R2 storage and Cloudflare Access.
+The service runs in the corporate account alongside the existing WARP organization.
 
 ```mermaid
 flowchart LR
-  Client[Turbo on WARP or CI] --> Access[Cloudflare Access policy]
-  Access --> Worker[Worker: verify JWT and team]
-  Worker --> R2[Private R2 bucket]
+  Client[Developer on WARP or project CI] --> Access[One corporate Access application]
+  Access --> Worker[Verify JWT and project membership]
+  Worker --> R2[Private R2: project/hash]
 ```
 
-Access controls admission. The Worker independently verifies RS256 signatures,
-issuer, audience, expiry and identity. Human identities and Access service-token
-identities are supported. A supplied `Cf-Access-Jwt-Assertion` takes precedence;
-a bad assertion cannot fall back to a good bearer. A signed Access application
-JWT can also be supplied as a bearer for direct protocol testing.
+## Authorization
 
-One Worker serves multiple project teams. `teamId` is the canonical key from
-[`infra/data/projects.json`](https://github.com/tractorbeamai/infra/blob/main/data/projects.json),
-for example `caddi`, `carlyle`, or `linden-investment`. `slug` is an alternative
-selector for the same key. At least one is required; duplicates and conflicting
-selectors are rejected. There is no default or shared namespace.
+One Access application protects `*.cache.tractorbeam.tools`. It admits members of
+an enabled project's existing Okta group. The Worker verifies the Access JWT's
+RS256 signature, issuer, audience, expiry, application-token type, and identity.
+Admission alone does not authorize an artifact: the signed `custom.groups` claim
+must include the requested project's exact `Project: <display_name or name>` group.
+Missing, malformed, or oversized claims deny access. Caller-supplied group headers
+are never trusted, and no identity lookup runs on artifact requests.
 
-Each project has its own hostname (`caddi.cache.tractorbeam.tools`) and Access
-application. The policy requires the existing Okta group (`Project: CADDi`),
-whose membership is already managed by infra. The Worker maps that application's
-verified AUD to the project through `PROJECT_ACCESS`; changing a query parameter
-cannot grant another project's access. Each project's audience grants both reads
-and writes; reusing an audience across projects fails closed.
+`teamId` is a key from
+[infra/data/projects.json](https://github.com/tractorbeamai/infra/blob/main/data/projects.json),
+such as `caddi` or `linden-investment`. `slug` is an alternative for the same key.
+At least one selector is required; repeated or conflicting selectors are rejected.
+The hostname does not grant project permission. Both reads and writes use the
+same membership check. R2 keys include the authorized project, so identical hashes
+in different projects remain independent.
 
-R2 object keys include the authorized project key:
-`caddi/<hash>` and `carlyle/<hash>` are independent artifacts. First-writer-wins
-applies within a project. No membership lists or IdP group claims are copied
-into this repository. [Project access](docs/project-access.md) describes the
-infra integration and remaining rollout checks.
+Only projects with `remote_cache: true` are enabled. `npm run sync-projects` reads
+the registry from infra's main branch and updates `[vars.PROJECTS]` in
+`wrangler.toml`. `npm run deploy` always performs this sync first. Redeploy after
+changing project flags or group names. For reviewing an unmerged registry locally:
 
-Every request is authorized before accessing R2. GET streams the R2 object body;
-HEAD reads its metadata. There is no CDN or Worker response cache, and client
-responses are `private, no-store`.
+```sh
+npm run sync-projects -- /path/to/infra/data/projects.json
+```
 
-Artifacts are opaque streamed bytes. An atomic conditional R2 write implements
-first-writer-wins: repeated uploads return success without replacing bytes or
-metadata. Different outputs/signing keys for the same task hash require a new
-namespace or artifact expiry.
+The shared Okta integration emits only `Project: ` memberships. Infra and the sync
+command bound the worst-case claim below 700 bytes and 64 groups, including
+projects without caches. Access may omit large custom claims; the Worker rejects
+missing claims instead of granting broader access. Group removal takes effect
+when the identity/session refreshes; disable a project's namespace and redeploy
+when all access to that project must stop immediately.
+
+Service tokens have no user memberships. `[vars.SERVICE_PROJECTS]` maps Access
+client IDs (public identifiers, never client secrets) to allowed project keys.
+It is empty by default. Setup resolves those IDs to existing service tokens and
+creates a narrowly scoped Service Auth policy. The Worker independently enforces
+the map. Changing a query parameter cannot expand a CI identity's permissions.
+
+## Storage and limits
+
+GET streams directly from private R2; HEAD reads object metadata. There is no CDN
+or Worker response cache. Client responses are `private, no-store`.
+
+Uploads stream with atomic first-writer-wins behavior: retries do not replace an
+existing artifact's bytes or metadata. Objects expire after 30 days and incomplete
+multipart uploads after one day. The bucket has no public custom domains and its
+`r2.dev` endpoint is disabled. Developers do not need R2 credentials.
 
 Limits: 64 MiB per artifact, 64 KiB JSON, 128 entries per batch, 256 hexadecimal
-characters per artifact hash, and 600 requests/minute per verified identity and project per
+characters per hash, and 600 requests/minute per verified identity/project per
 Cloudflare location. The rate limiter is abuse control, not a global quota.
 Duration, signature tag, source SHA and dirty hash are preserved. Events are
-validated and acknowledged without retaining telemetry. No delete/admin API is
-exposed.
+validated and acknowledged without storing build telemetry. There is no delete API.
 
 ## Development and verification
 
-Requires Node 24 and uv (for the isolated Schemathesis CLI). There is no Python
-project, pytest harness, or Python dependency lockfile. Schemathesis itself is a
-Python application; uv manages its runtime and dependencies outside this project.
+Requires Node 24 and uv for the isolated Schemathesis CLI. There is no Python
+project or Python lockfile; uv manages Schemathesis's own runtime and dependencies.
 
 ```sh
 npm ci
 npm run check
 ```
 
-The checks run TypeScript, formatting, a deployment dry run, workerd/R2 protocol
-and authorization tests, and the pinned Schemathesis CLI against the untouched
-upstream OpenAPI document. Node tests verify multi-request artifact workflows.
-Tests create ephemeral signing keys and intercept only the JWKS HTTP boundary;
-they run the production JWT verifier and real local R2 implementation. There is
-no development authentication bypass. The test rate limit is raised for fuzzing;
-a separate test exercises enforcement.
+Checks include TypeScript, formatting, a deployment dry run, real local workerd/R2
+security and protocol tests, and Schemathesis against the unchanged upstream
+OpenAPI document. Test fixtures sign ephemeral Access JWTs and mock only JWKS
+retrieval. They do not bypass the production authorization code.
+[Contract provenance and exceptions](spec/README.md) describe the exact coverage.
 
-`npm run dev` fails closed until Access issuer/audiences are configured. For an
-isolated local fixture, the tests manage their own server automatically.
-[Contract provenance and CLI exceptions](spec/README.md) describe the exact claims.
-Local tests do not establish Access/WARP policy correctness
-or cloud IAM permissions; the deployment checks below cover those boundaries.
+`npm run dev` fails closed until a real issuer/audience and identity are available.
+The automated tests provide their own isolated local server and identity fixture.
 
-## Deployment to tractorbeam-nonprod
+## Configuration and deployment
 
-Deployment has **not** been performed. The nonprod account ID is
-`b534f6f9c114635cacb3cfd15861c516`, verified from current `infra/main` and set in
-`wrangler.jsonc`. The connected Cloudflare MCP still has corporate-only access;
-a direct read against nonprod returned an authentication error.
+This repo owns the Worker and its supporting cache resources:
 
-1. Review and apply the companion `infra/cloudflare/nonprod/remote-cache.tf`
-   change through the infra repository's existing OpenTofu workflow. It owns the
-   private bucket, disabled `r2.dev`, 30-day retention, and one Access application
-   per project. No public R2 custom domains or developer S3 credentials are needed.
-2. Verify native Okta group retrieval in the **nonprod** Access identity provider
-   and test each project's Allow policy. A login-method-only workforce policy
-   is insufficient. CI needs a separately approved, project-specific Service Auth
-   policy; the corporate WARP enrollment token must not grant every project.
-3. Set `ACCESS_ISSUER` to the nonprod Access organization's actual issuer. Copy
-   the `remote_cache_project_access` output into the `PROJECT_ACCESS` JSON binding.
-   These AUDs are public configuration, not credentials. Empty configuration,
-   malformed project keys, and cross-project audience reuse fail closed.
-4. Confirm the selected hostname routing with infra's Route 53/Cloudflare partial
-   zone setup. Attach each `remote_cache_hostnames` output to this Worker only
-   after Access protects it. Keep `workers_dev`, preview URLs and default-entrypoint
-   caching disabled.
-5. Use an authorized nonprod Worker deployment credential, then run
-   `npm run check` and `npm run deploy`. The documented provider credential source
-   is `tractorbeam/cloudflare/nonprod/terraform-provider` in shared-services AWS;
-   discovering that source does not authorize exposing or copying its token.
-6. Verify real WARP session authentication across the corporate/nonprod boundary.
-   The existing corporate organization has WARP authentication disabled globally;
-   the new applications enable it explicitly, but corporate enrollment alone does
-   not prove authentication to the separate nonprod Access organization. Existing
-   Okta device-trust policy remains authoritative for endpoint compliance.
-7. Test two project users against the same hash: upload distinct bytes, HEAD,
-   download, repeat, and batch lookup. Cross-project reads/writes must fail. Test
-   missing/expired tokens, a project-scoped CI identity, and direct Worker/R2 URLs. Review
-   account-wide R2 tokens and human roles; administrators can bypass application
-   Access policy through their account permissions.
+| File                           | Responsibility                                                                      |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| `wrangler.toml`                | Corporate account, routes, R2 binding, issuer/audience, project and CI maps, limits |
+| `cloudflare/access.json`       | Single Access application, corporate Okta provider, WARP authentication             |
+| `cloudflare/r2-lifecycle.json` | Artifact and multipart expiry                                                       |
+| `scripts/setup.mjs`            | Reconcile Access through its API; manage private R2 with Wrangler                   |
 
-Rollback: use `npx wrangler rollback` for Worker code. Retain the Access protection
-and private bucket settings; a code rollback must never expose the artifacts.
+Wrangler does not declare production Access policies or R2 lifecycle rules in
+TOML. The small setup command keeps those settings in this repo rather than infra.
+Infra retains only shared Okta/Access claim forwarding and project definitions.
+See [project access](docs/project-access.md) for the identity integration.
+
+1. Apply [infra PR #1541](https://github.com/tractorbeamai/infra/pull/1541) through
+   its normal workflow. This adds the filtered Okta groups claim and Access claim
+   forwarding. It creates no cache-specific resources.
+2. Authenticate a managed device again and verify the signed Access application
+   JWT contains `custom.groups` through WARP. The app enables WARP authentication
+   explicitly; no organization-wide authentication setting is changed.
+3. Establish corporate routing for `*.cache.tractorbeam.tools`, preserving Route
+   53 DNS ownership and the appropriate Cloudflare zone, proxy, and TLS setup.
+   `wrangler.toml` declares the intended Worker route; it does not create a zone
+   or change authoritative DNS.
+4. Supply a scoped `CLOUDFLARE_API_TOKEN` through your approved local or CI secret
+   environment. Setup needs Access app management, IdP metadata read, R2 management,
+   and service-token metadata read if CI mappings are configured. Deployment also
+   needs Worker and route management. Never commit the token.
+5. Sync and preview the desired Access application, then run checks and deploy:
+
+   ```sh
+   npm run sync-projects
+   npm run setup
+   npm run check
+   npm run deploy
+   ```
+
+`npm run setup` only previews. `npm run setup -- --apply` reconciles the Access app
+and private bucket and writes the public audience tag into `wrangler.toml`.
+Deployment syncs projects, reconciles setup, and calls Wrangler. Setup refuses to
+proceed until the corporate IdP forwards `groups`. It replaces this cache app's
+policies and bucket lifecycle with the checked-in definitions; edit those sources
+instead of making dashboard changes. Commit refreshed project mappings and AUD.
+
+Before declaring rollout complete, verify authorized WARP upload/download,
+missing-claim denial, denial between two projects, mapped/unmapped CI identities,
+and denial at direct R2 and alternate Worker URLs. Keep `workers_dev` and preview
+URLs disabled. Account administrators and independent R2 credentials remain
+separate access paths; review their permissions separately.
+
+Current status: not deployed. Wrangler has no usable login/API token, the shared
+claim changes are pending in infra, and the connected corporate API returned no
+`tractorbeam.tools` zone. These must be resolved before publishing the route.
+
+Rollback Worker code with `npx wrangler rollback`. Retain Access and bucket privacy.
+Rolling back project maps or service allowlists can restore access, so review them
+alongside the code version.
 
 ## Client setup
 
-The API is rooted at `/artifacts/...`, with no `/v8` route or compatibility alias.
-Stock Turbo hardcodes `/v8/artifacts/...` and therefore cannot use this deployment
-directly. Setting `TURBO_API` to the hostname does not remove that prefix; a
-modified client is required. Stock-client compatibility is intentionally outside
-this implementation's current scope.
+The API is rooted at `/artifacts/...`, with no `/v8` compatibility route.
+Stock Turbo hardcodes `/v8/artifacts/...`, so a modified client is still required;
+setting `TURBO_API` does not remove that prefix.
 
-Clients must reach the Access-protected hostname through the configured WARP
-session or a deliberate CI Service Auth policy. WARP connectivity alone does not
-grant access. Access supplies the signed assertion verified by the Worker. For
-service tokens, a client must supply `CF-Access-Client-Id` and
-`CF-Access-Client-Secret`; a bearer containing the service-token secret is not
-equivalent. Never commit credentials or artifact-signing keys.
+Use `https://caddi.cache.tractorbeam.tools` with `teamId=caddi`, for example.
+Access supplies the signed `Cf-Access-Jwt-Assertion`; it takes precedence over any
+bearer token. A signed application JWT may also be supplied as a bearer for
+protocol testing. An invalid assertion never falls back to a valid bearer.
 
-Artifacts and signature tags remain opaque to the server. Clients should verify
-artifact signatures before restoring outputs. This repository's checks use
-isolated local infrastructure and require no Cloudflare credentials.
+CI clients supply `CF-Access-Client-Id` and `CF-Access-Client-Secret`. The secret
+itself is not an application JWT. Clients should verify artifact signatures before
+restoring outputs; the server stores artifacts and signature tags as opaque data.
 
 ## Sources
 
 - [Turborepo remote-cache specification](https://turborepo.dev/api/remote-cache-spec)
-- [Vercel artifact upload API](https://vercel.com/docs/rest-api/artifacts/upload-a-cache-artifact)
-- [Cloudflare Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
-- [Access human and service application tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)
+- [Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
+- [Access application tokens and custom-claim limits](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)
+- [Custom OIDC claims](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/generic-oidc/#custom-oidc-claims)
 - [Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)
-- [Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)

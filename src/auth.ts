@@ -2,11 +2,21 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 
-export const teamIdSchema = z
+const teamIdSchema = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
   .max(64);
-const projectAccessSchema = z.record(teamIdSchema, z.string().min(1));
+const projectsSchema = z.record(
+  teamIdSchema,
+  z.string().startsWith("Project: ").max(128),
+);
+const serviceProjectsSchema = z.record(
+  z.string().min(1).max(256),
+  z.array(teamIdSchema).min(1),
+);
+const groupsSchema = z.object({
+  groups: z.array(z.string().startsWith("Project: ").max(128)).max(64),
+});
 
 // Only public verification keys are cached. Credentials and identities are never
 // shared between requests. A config change replaces the resolver.
@@ -31,17 +41,17 @@ export async function authenticate(
   env: Env,
 ): Promise<{ subject: string; teamId: string }> {
   const issuer = env.ACCESS_ISSUER;
-  const projects = projectAccessSchema.safeParse(env.PROJECT_ACCESS);
+  const projects = projectsSchema.safeParse(env.PROJECTS);
+  const services = serviceProjectsSchema.safeParse(env.SERVICE_PROJECTS);
   if (
     !/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(issuer) ||
+    !env.ACCESS_AUD ||
+    !services.success ||
     !projects.success ||
     !Object.keys(projects.data).length
   ) {
     fail(503, "auth_unconfigured", "Project Access configuration is required");
   }
-  const audiences = Object.values(projects.data);
-  if (new Set(audiences).size !== audiences.length)
-    fail(503, "auth_unconfigured", "Access audiences must be project-specific");
   const assertion = request.headers.get("Cf-Access-Jwt-Assertion");
   const bearer = request.headers
     .get("Authorization")
@@ -57,16 +67,22 @@ export async function authenticate(
   }
   const { payload } = await jwtVerify(token, keyCache.keys, {
     issuer,
-    audience: audiences,
+    audience: env.ACCESS_AUD,
     algorithms: ["RS256"],
-    requiredClaims: ["exp", "iat", "sub"],
+    requiredClaims: ["exp", "iat", "sub", "type"],
   }).catch(() => fail(401, "unauthorized", "A valid Access token is required"));
-  const subject = payload.sub
-    ? `user:${payload.sub}`
-    : payload.sub === "" &&
-        typeof payload.common_name === "string" &&
-        payload.common_name.endsWith(".access")
-      ? `service:${payload.common_name}`
+  if (payload.type !== "app")
+    fail(401, "unauthorized", "An Access application token is required");
+  const serviceId =
+    payload.sub === "" &&
+    typeof payload.common_name === "string" &&
+    payload.common_name.length > 0
+      ? payload.common_name
+      : undefined;
+  const subject = serviceId
+    ? `service:${serviceId}`
+    : payload.sub
+      ? `user:${payload.sub}`
       : undefined;
   if (!subject) fail(401, "unauthorized", "Invalid Access identity");
 
@@ -80,13 +96,27 @@ export async function authenticate(
   const teamId = ids[0] ?? slugs[0];
   if (!teamId || !teamIdSchema.safeParse(teamId).success)
     fail(400, "invalid_query", "A project teamId or slug is required");
-  const access = Object.hasOwn(projects.data, teamId)
+  const group = Object.hasOwn(projects.data, teamId)
     ? projects.data[teamId]
     : undefined;
-  const tokenAudiences = Array.isArray(payload.aud)
-    ? payload.aud
-    : [payload.aud];
-  if (!access || !tokenAudiences.includes(access))
-    fail(403, "forbidden", "Project is not authorized");
+  if (!group) fail(403, "forbidden", "Project is not enabled");
+
+  if (serviceId) {
+    const allowed = Object.hasOwn(services.data, serviceId)
+      ? services.data[serviceId]
+      : [];
+    if (!allowed.includes(teamId))
+      fail(403, "forbidden", "Service is not authorized for this project");
+  } else {
+    // Access may omit custom claims when they exceed its cookie budget. Never
+    // fall back to admission alone or trust caller-provided group headers.
+    const custom = groupsSchema.safeParse(payload.custom);
+    if (
+      !custom.success ||
+      new TextEncoder().encode(JSON.stringify(payload.custom)).length > 700 ||
+      !custom.data.groups.includes(group)
+    )
+      fail(403, "forbidden", "Project membership is required");
+  }
   return { subject, teamId };
 }

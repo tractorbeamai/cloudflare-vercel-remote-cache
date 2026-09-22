@@ -1,13 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { parse } from "jsonc-parser";
+import { parse } from "smol-toml";
 
+export const configPath = new URL("../wrangler.toml", import.meta.url);
 export async function readConfig() {
-  const errors = [];
-  const config = parse(
-    await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
-    errors,
-    { allowTrailingComma: true },
-  );
-  if (errors.length) throw new Error("Invalid wrangler.jsonc");
-  return config;
+  return parse(await readFile(configPath, "utf8"));
 }
