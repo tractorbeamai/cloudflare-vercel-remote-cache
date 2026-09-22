@@ -6,10 +6,7 @@ export const teamIdSchema = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
   .max(64);
-const projectAccessSchema = z.record(
-  teamIdSchema,
-  z.object({ read: z.string().min(1), write: z.string().min(1) }),
-);
+const projectAccessSchema = z.record(teamIdSchema, z.string().min(1));
 
 // Only public verification keys are cached. Credentials and identities are never
 // shared between requests. A config change replaces the resolver.
@@ -32,7 +29,7 @@ export function fail(
 export async function authenticate(
   request: Request,
   env: Env,
-): Promise<{ subject: string; writable: boolean; teamId: string }> {
+): Promise<{ subject: string; teamId: string }> {
   const issuer = env.ACCESS_ISSUER;
   const projects = projectAccessSchema.safeParse(env.PROJECT_ACCESS);
   if (
@@ -42,20 +39,9 @@ export async function authenticate(
   ) {
     fail(503, "auth_unconfigured", "Project Access configuration is required");
   }
-  // One Access app may grant read/write for one project, never multiple projects.
-  const audienceOwners = new Map<string, string>();
-  for (const [teamId, access] of Object.entries(projects.data)) {
-    for (const audience of [access.read, access.write]) {
-      const owner = audienceOwners.get(audience);
-      if (owner !== undefined && owner !== teamId)
-        fail(
-          503,
-          "auth_unconfigured",
-          "Access audiences must be project-specific",
-        );
-      audienceOwners.set(audience, teamId);
-    }
-  }
+  const audiences = Object.values(projects.data);
+  if (new Set(audiences).size !== audiences.length)
+    fail(503, "auth_unconfigured", "Access audiences must be project-specific");
   const assertion = request.headers.get("Cf-Access-Jwt-Assertion");
   const bearer = request.headers
     .get("Authorization")
@@ -71,7 +57,7 @@ export async function authenticate(
   }
   const { payload } = await jwtVerify(token, keyCache.keys, {
     issuer,
-    audience: [...audienceOwners.keys()],
+    audience: audiences,
     algorithms: ["RS256"],
     requiredClaims: ["exp", "iat", "sub"],
   }).catch(() => fail(401, "unauthorized", "A valid Access token is required"));
@@ -97,11 +83,10 @@ export async function authenticate(
   const access = Object.hasOwn(projects.data, teamId)
     ? projects.data[teamId]
     : undefined;
-  const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-  if (
-    !access ||
-    ![access.read, access.write].some((aud) => audiences.includes(aud))
-  )
+  const tokenAudiences = Array.isArray(payload.aud)
+    ? payload.aud
+    : [payload.aud];
+  if (!access || !tokenAudiences.includes(access))
     fail(403, "forbidden", "Project is not authorized");
-  return { subject, teamId, writable: audiences.includes(access.write) };
+  return { subject, teamId };
 }

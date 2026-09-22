@@ -34,7 +34,7 @@ export async function startHarness(overrides = {}, options = {}) {
       .setProtectedHeader({ alg: "RS256", kid: "test-key" })
       .setIssuer(claims.iss ?? issuer)
       .setSubject(claims.sub ?? "test-user")
-      .setAudience(claims.aud ?? "write-audience")
+      .setAudience(claims.aud ?? "caddi-audience")
       .setIssuedAt()
       .setExpirationTime(claims.exp ?? "1h")
       .sign(privateKey);
@@ -42,8 +42,8 @@ export async function startHarness(overrides = {}, options = {}) {
     ...config.vars,
     ACCESS_ISSUER: issuer,
     PROJECT_ACCESS: {
-      caddi: { read: "read-audience", write: "write-audience" },
-      carlyle: { read: "carlyle-read", write: "carlyle-write" },
+      caddi: "caddi-audience",
+      carlyle: "carlyle-audience",
     },
     ...overrides,
   };
@@ -57,7 +57,6 @@ export async function startHarness(overrides = {}, options = {}) {
           compatibilityDate: config.compatibility_date,
           compatibilityFlags: config.compatibility_flags,
           cache: config.cache,
-          exports: config.exports,
           manifest: {
             mainModule: "worker.js",
             modules: {

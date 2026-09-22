@@ -9,15 +9,10 @@
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 0.1 },
   "cache": { "enabled": false },
-  "exports": {
-    "default": { "type": "worker", "cache": { "enabled": false } },
-    "ArtifactReader": { "type": "worker", "cache": { "enabled": true } },
-  },
   "vars": {
     "ACCESS_ISSUER": "",
     "PROJECT_ACCESS": {},
     "MAX_ARTIFACT_BYTES": 67108864,
-    "CACHE_TTL_SECONDS": 300,
   },
   "r2_buckets": [
     {

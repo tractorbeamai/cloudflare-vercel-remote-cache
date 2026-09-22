@@ -34,7 +34,7 @@ the explicit HEAD body exception. There are no schema links for stateful tests;
 Node tests cover the upload → HEAD → repeated GET → batch workflow.
 
 These checks establish the tested protocol behavior, not formal certification
-or stock Turbo compatibility. Cloud Access/WARP enforcement, edge cache hits,
+or stock Turbo compatibility. Cloud Access/WARP enforcement,
 IAM and bucket public-access settings require the deployed checks in the root
 README. No tests target Vercel's service.
 

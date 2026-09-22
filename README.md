@@ -1,7 +1,6 @@
 # Cloudflare-native Turborepo remote cache
 
-Hono on Cloudflare Workers, private R2 storage, Cloudflare Access authentication,
-and Workers Cache on an internal read entrypoint. No Containers, KV, public R2
+Hono on Cloudflare Workers with private R2 storage and Cloudflare Access authentication. No Containers, KV, public R2
 endpoint, or shared static cache password.
 
 ## Request path
@@ -9,10 +8,8 @@ endpoint, or shared static cache password.
 ```mermaid
 flowchart LR
   Client[Turbo on WARP or CI] --> Access[Cloudflare Access policy]
-  Access --> Gateway[Uncached Worker: verify JWT and team]
-  Gateway -->|GET| Reader[Internal cached artifact reader]
-  Reader --> R2[Private R2 bucket]
-  Gateway -->|PUT, HEAD, batch| R2
+  Access --> Worker[Worker: verify JWT and team]
+  Worker --> R2[Private R2 bucket]
 ```
 
 Access controls admission. The Worker independently verifies RS256 signatures,
@@ -31,28 +28,23 @@ Each project has its own hostname (`caddi.cache.tractorbeam.tools`) and Access
 application. The policy requires the existing Okta group (`Project: CADDi`),
 whose membership is already managed by infra. The Worker maps that application's
 verified AUD to the project through `PROJECT_ACCESS`; changing a query parameter
-cannot grant another project's access. Read and write audiences can differ,
-with the write audience also granting reads. A single project app can occupy
-both roles, but reusing an audience across projects fails closed.
+cannot grant another project's access. Each project's audience grants both reads
+and writes; reusing an audience across projects fails closed.
 
-Both R2 objects and internal cache URLs include the authorized project key:
+R2 object keys include the authorized project key:
 `caddi/<hash>` and `carlyle/<hash>` are independent artifacts. First-writer-wins
 applies within a project. No membership lists or IdP group claims are copied
 into this repository. [Project access](docs/project-access.md) describes the
 infra integration and remaining rollout checks.
 
-The gateway always runs before a read reaches the internal cache. It creates a
-fresh internal request, so arbitrary query parameters, credentials, cookies,
-ranges and conditional headers cannot change the shared response. Only successful
-GETs are cached, for five minutes. HEAD uses R2 metadata. Client responses are
-`private, no-store`. Cache contents are version-isolated by default. Do not expose
-the named `ArtifactReader` entrypoint through another public Worker or service.
+Every request is authorized before accessing R2. GET streams the R2 object body;
+HEAD reads its metadata. There is no CDN or Worker response cache, and client
+responses are `private, no-store`.
 
 Artifacts are opaque streamed bytes. An atomic conditional R2 write implements
 first-writer-wins: repeated uploads return success without replacing bytes or
 metadata. Different outputs/signing keys for the same task hash require a new
-namespace or artifact expiry. R2 lifecycle expiry can leave a cached copy readable
-for up to the cache TTL; use purge when immediate deletion is required.
+namespace or artifact expiry.
 
 Limits: 64 MiB per artifact, 64 KiB JSON, 128 entries per batch, 256 hexadecimal
 characters per artifact hash, and 600 requests/minute per verified identity and project per
@@ -83,7 +75,7 @@ a separate test exercises enforcement.
 `npm run dev` fails closed until Access issuer/audiences are configured. For an
 isolated local fixture, the tests manage their own server automatically.
 [Contract provenance and CLI exceptions](spec/README.md) describe the exact claims.
-Local tests do not establish Access/WARP policy correctness, deployed CDN hits,
+Local tests do not establish Access/WARP policy correctness
 or cloud IAM permissions; the deployment checks below cover those boundaries.
 
 ## Deployment to tractorbeam-nonprod
@@ -108,7 +100,7 @@ a direct read against nonprod returned an authentication error.
 4. Confirm the selected hostname routing with infra's Route 53/Cloudflare partial
    zone setup. Attach each `remote_cache_hostnames` output to this Worker only
    after Access protects it. Keep `workers_dev`, preview URLs and default-entrypoint
-   caching disabled. Do not attach the internal `ArtifactReader` independently.
+   caching disabled.
 5. Use an authorized nonprod Worker deployment credential, then run
    `npm run check` and `npm run deploy`. The documented provider credential source
    is `tractorbeam/cloudflare/nonprod/terraform-provider` in shared-services AWS;
@@ -119,9 +111,8 @@ a direct read against nonprod returned an authentication error.
    not prove authentication to the separate nonprod Access organization. Existing
    Okta device-trust policy remains authoritative for endpoint compliance.
 7. Test two project users against the same hash: upload distinct bytes, HEAD,
-   download, repeat with a confirmed edge cache hit, and batch lookup. Cross-project
-   reads/writes must fail, including after cache hits. Test missing/expired tokens,
-   read-only tokens, a project-scoped CI identity, and direct Worker/R2 URLs. Review
+   download, repeat, and batch lookup. Cross-project reads/writes must fail. Test
+   missing/expired tokens, a project-scoped CI identity, and direct Worker/R2 URLs. Review
    account-wide R2 tokens and human roles; administrators can bypass application
    Access policy through their account permissions.
 
@@ -155,5 +146,3 @@ isolated local infrastructure and require no Cloudflare credentials.
 - [Access human and service application tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)
 - [Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)
 - [Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
-- [Workers Cache authentication pattern](https://developers.cloudflare.com/workers/cache/examples/)
-- [Legacy Cache API limitations](https://developers.cloudflare.com/workers/runtime-apis/cache/)

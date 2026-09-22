@@ -53,7 +53,7 @@ test("artifact bytes and metadata survive upload, HEAD, repeated GET and batch q
   });
 });
 
-test("missing, invalid, expired, wrong issuer and wrong audience tokens cannot read warmed artifacts", async () => {
+test("missing, invalid, expired, wrong issuer and wrong audience tokens cannot read stored artifacts", async () => {
   await upload("a11", "private bytes");
   assert.equal((await h.request(path("a11"))).status, 200);
   for (const token of [
@@ -79,22 +79,8 @@ test("missing, invalid, expired, wrong issuer and wrong audience tokens cannot r
   );
 });
 
-test("read audience can read but cannot upload; team selectors require project permission", async () => {
-  const token = await h.sign({ aud: "read-audience" });
+test("team selectors require project permission", async () => {
   await upload("a12", "authorized");
-  assert.equal(
-    (
-      await h.request(path("a12"), {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-    ).status,
-    200,
-  );
-  assert.equal(
-    (await upload("a13", "blocked", { Authorization: `Bearer ${token}` }))
-      .status,
-    403,
-  );
   for (const suffix of ["?teamId=other", "?slug=other"]) {
     assert.equal((await h.request(path("a12") + suffix)).status, 403);
     assert.equal((await upload("a12" + suffix, "blocked")).status, 403);
@@ -292,9 +278,9 @@ test("binary artifacts retain exact bytes across boundary sizes", async () => {
   }
 });
 
-test("identical hashes in different projects have separate bytes, metadata, and cache keys", async () => {
+test("identical hashes in different projects have separate bytes and metadata", async () => {
   const id = "b001";
-  const carlyleToken = await h.sign({ aud: "carlyle-write" });
+  const carlyleToken = await h.sign({ aud: "carlyle-audience" });
   const carlyle = (route, init = {}) =>
     h.request(`${route}?teamId=carlyle`, {
       ...init,
@@ -343,9 +329,9 @@ test("identical hashes in different projects have separate bytes, metadata, and 
   }
 });
 
-test("project audiences deny cross-project operations even after cache reads", async () => {
+test("project audiences deny cross-project operations after successful reads", async () => {
   await upload("b002", "CADDi artifact");
-  const writer = await h.sign({ aud: "carlyle-write" });
+  const writer = await h.sign({ aud: "carlyle-audience" });
   const auth = { Authorization: `Bearer ${writer}` };
   await h.request("/artifacts/b002?teamId=carlyle", {
     method: "PUT",
@@ -380,21 +366,6 @@ test("project audiences deny cross-project operations even after cache reads", a
     ).status,
     403,
   );
-  const readOnly = await h.sign({ aud: "carlyle-read" });
-  assert.equal(
-    (
-      await h.request("/artifacts/b002?teamId=carlyle", {
-        method: "PUT",
-        body: "blocked",
-        headers: { Authorization: `Bearer ${readOnly}` },
-      })
-    ).status,
-    403,
-  );
-  const allowed = await h.request("/artifacts/b002?teamId=carlyle", {
-    headers: { Authorization: `Bearer ${readOnly}` },
-  });
-  assert.equal(await allowed.text(), "Carlyle artifact");
 });
 
 test("team selection is explicit, unambiguous, and cannot inject a storage path", async () => {
@@ -423,12 +394,12 @@ test("team selection is explicit, unambiguous, and cannot inject a storage path"
 
 test("misconfigured project audience maps fail closed", async () => {
   for (const projects of [
-    { caddi: { read: "read-audience", write: "" } },
+    { caddi: "" },
     {
-      caddi: { read: "read-audience", write: "write-audience" },
-      carlyle: { read: "write-audience", write: "carlyle-write" },
+      caddi: "caddi-audience",
+      carlyle: "caddi-audience",
     },
-    { "../caddi": { read: "read-audience", write: "write-audience" } },
+    { "../caddi": "caddi-audience" },
   ]) {
     const broken = await startHarness({ PROJECT_ACCESS: projects });
     try {
@@ -442,7 +413,7 @@ test("misconfigured project audience maps fail closed", async () => {
 test("one project application can grant both read and write", async () => {
   const shared = await startHarness({
     PROJECT_ACCESS: {
-      caddi: { read: "write-audience", write: "write-audience" },
+      caddi: "caddi-audience",
     },
   });
   try {

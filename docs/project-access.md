@@ -24,15 +24,15 @@ Copy the applied `remote_cache_project_access` output into the Worker's
 
 ```json
 {
-  "caddi": { "read": "<CADDi app AUD>", "write": "<CADDi app AUD>" },
-  "carlyle": { "read": "<Carlyle app AUD>", "write": "<Carlyle app AUD>" }
+  "caddi": "<CADDi app AUD>",
+  "carlyle": "<Carlyle app AUD>"
 }
 ```
 
 The Worker verifies the issuer, signature, expiry, audience and identity before
 resolving `teamId`/`slug`. A valid token for another configured project receives 403. An unknown audience receives 401. Missing or conflicting selectors receive
 400 after authentication. No caller-provided group or team header grants access.
-The R2 prefix and internal cache URL use the authorized project key. The same hash
+The R2 prefix uses the authorized project key. The same hash
 may contain different bytes in different projects without a collision.
 
 Application removal and Worker configuration removal should be coordinated.
@@ -41,8 +41,7 @@ applications and appear in the Worker configuration output. Omitted or false
 disables the project cache. Disabling the flag or removing a project removes its
 Access application on apply;
 remove its AUD from the Worker binding too. Existing signed JWTs can otherwise
-remain locally valid until expiration. Artifacts expire through R2 lifecycle,
-and cached copies can persist for the configured cache TTL.
+remain locally valid until expiration. Artifacts expire through R2 lifecycle.
 
 ## Rollout boundaries
 

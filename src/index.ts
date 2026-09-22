@@ -1,10 +1,9 @@
-import { WorkerEntrypoint } from "cloudflare:workers";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { authenticate, fail, teamIdSchema } from "./auth";
+import { authenticate, fail } from "./auth";
 
-type App = { Bindings: Env; Variables: { writable: boolean; teamId: string } };
+type App = { Bindings: Env; Variables: { teamId: string } };
 const app = new Hono<App>();
 const encoder = new TextEncoder();
 const hashSchema = z
@@ -51,7 +50,6 @@ app.notFound(() => fail(404, "not_found", "Route not found"));
 
 app.use("*", async (c, next) => {
   const identity = await authenticate(c.req.raw, c.env);
-  c.set("writable", identity.writable);
   const url = new URL(c.req.url);
   c.set("teamId", identity.teamId);
   const ci = c.req.header("x-artifact-client-ci");
@@ -181,7 +179,6 @@ app.post("/artifacts", async (c) => {
   return c.json(Object.fromEntries(entries));
 });
 app.put("/artifacts/:hash", async (c) => {
-  if (!c.get("writable")) fail(403, "forbidden", "Write access required");
   const value = hash(c.req.param("hash"));
   if (
     c.req.header("Content-Type")?.split(";")[0].trim() !==
@@ -220,7 +217,7 @@ app.put("/artifacts/:hash", async (c) => {
   if (metadataBytes > 2048)
     fail(400, "invalid_metadata", "Metadata exceeds R2 limit");
   // Atomic first-writer-wins: retries succeed without changing stored bytes or
-  // metadata. Cached copies stay valid even when writers race for the same hash.
+  // metadata, even when writers race for the same hash.
   await c.env.ARTIFACTS.put(
     key(c.get("teamId"), value),
     c.req.raw.body ?? new Uint8Array(),
@@ -240,45 +237,9 @@ app.on(["GET", "HEAD"], "/artifacts/:hash", async (c) => {
     if (!object) fail(404, "not_found", "Artifact not found");
     return new Response(null, { headers: headers(object) });
   }
-  // Construct a fresh internal request: client cookies, authorization, ranges,
-  // conditionals and arbitrary query parameters must not influence shared cache.
-  return c.executionCtx.exports.ArtifactReader.fetch(
-    new Request(`https://artifacts.internal/${key(c.get("teamId"), value)}`),
-  );
+  const object = await c.env.ARTIFACTS.get(key(c.get("teamId"), value));
+  if (!object) fail(404, "not_found", "Artifact not found");
+  return new Response(object.body, { headers: headers(object) });
 });
 
-export class ArtifactReader extends WorkerEntrypoint<Env> {
-  async fetch(request: Request): Promise<Response> {
-    const [, teamId, value, ...extra] = new URL(request.url).pathname.split(
-      "/",
-    );
-    if (
-      request.method !== "GET" ||
-      extra.length ||
-      !teamIdSchema.safeParse(teamId).success ||
-      !Object.hasOwn(this.env.PROJECT_ACCESS, teamId) ||
-      !hashSchema.safeParse(value).success
-    ) {
-      return new Response(null, {
-        status: 400,
-        headers: { "Cache-Control": "no-store" },
-      });
-    }
-    const object = await this.env.ARTIFACTS.get(key(teamId, value));
-    if (!object)
-      return Response.json(
-        { code: "not_found", message: "Artifact not found" },
-        {
-          status: 404,
-          headers: { "Cache-Control": "no-store" },
-        },
-      );
-    const responseHeaders = headers(object);
-    responseHeaders.set(
-      "Cache-Control",
-      `public, max-age=${this.env.CACHE_TTL_SECONDS}`,
-    );
-    return new Response(object.body, { headers: responseHeaders });
-  }
-}
 export default app;

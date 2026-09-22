@@ -8,7 +8,7 @@ if (
   !config.vars.ACCESS_ISSUER ||
   !Object.keys(config.vars.PROJECT_ACCESS ?? {}).length ||
   Object.values(config.vars.PROJECT_ACCESS).some(
-    (project) => !project.read || !project.write,
+    (audience) => typeof audience !== "string" || !audience,
   )
 ) {
   throw new Error(
@@ -26,7 +26,7 @@ if (
 if (
   config.workers_dev !== false ||
   config.preview_urls !== false ||
-  config.exports.default.cache.enabled !== false
+  config.cache.enabled !== false
 ) {
   throw new Error("Public previews and gateway caching must remain disabled");
 }
