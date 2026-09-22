@@ -2,7 +2,8 @@ node_modules
 dist
 worker-configuration.d.ts
 spec/upstream.json
-uv.lock
 .venv
 .wrangler
 reports
+
+.schemathesis/

@@ -9,3 +9,5 @@ dist/
 __pycache__/
 reports/
 worker-configuration.d.ts
+
+.schemathesis/

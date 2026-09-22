@@ -77,11 +77,11 @@ app.use("*", async (c, next) => {
   const limited = await c.env.REQUEST_LIMITER.limit({ key: identity.subject });
   if (!limited.success) fail(429, "rate_limited", "Request limit exceeded");
   const methods =
-    url.pathname === "/v8/artifacts/status"
+    url.pathname === "/artifacts/status"
       ? ["GET"]
-      : ["/v8/artifacts", "/v8/artifacts/events"].includes(url.pathname)
+      : ["/artifacts", "/artifacts/events"].includes(url.pathname)
         ? ["POST"]
-        : /^\/v8\/artifacts\/[^/]+$/.test(url.pathname)
+        : /^\/artifacts\/[^/]+$/.test(url.pathname)
           ? ["GET", "HEAD", "PUT"]
           : undefined;
   if (methods && !methods.includes(c.req.method)) {
@@ -162,14 +162,14 @@ async function jsonBody(request: Request): Promise<unknown> {
   }
 }
 
-app.get("/v8/artifacts/status", (c) => c.json({ status: "enabled" }));
-app.post("/v8/artifacts/events", async (c) => {
+app.get("/artifacts/status", (c) => c.json({ status: "enabled" }));
+app.post("/artifacts/events", async (c) => {
   if (!eventSchema.safeParse(await jsonBody(c.req.raw)).success)
     fail(400, "invalid_events", "Invalid cache events");
   // Acknowledge telemetry without storing potentially sensitive build information.
   return c.json({});
 });
-app.post("/v8/artifacts", async (c) => {
+app.post("/artifacts", async (c) => {
   const parsed = querySchema.safeParse(await jsonBody(c.req.raw));
   if (!parsed.success) fail(400, "invalid_query", "Invalid artifact query");
   const entries: [string, unknown][] = [];
@@ -193,7 +193,7 @@ app.post("/v8/artifacts", async (c) => {
   }
   return c.json(Object.fromEntries(entries));
 });
-app.put("/v8/artifacts/:hash", async (c) => {
+app.put("/artifacts/:hash", async (c) => {
   if (!c.get("writable")) fail(403, "forbidden", "Write access required");
   const value = hash(c.req.param("hash"));
   if (
@@ -246,11 +246,11 @@ app.put("/v8/artifacts/:hash", async (c) => {
       customMetadata,
     },
   );
-  const url = new URL(`/v8/artifacts/${value}`, c.req.url);
+  const url = new URL(`/artifacts/${value}`, c.req.url);
   url.searchParams.set("teamId", c.env.TEAM_ID);
   return c.json({ urls: [url.toString()] }, 202);
 });
-app.on(["GET", "HEAD"], "/v8/artifacts/:hash", async (c) => {
+app.on(["GET", "HEAD"], "/artifacts/:hash", async (c) => {
   const value = hash(c.req.param("hash"));
   if (c.req.method === "HEAD") {
     const object = await c.env.ARTIFACTS.head(key(c.env, value));

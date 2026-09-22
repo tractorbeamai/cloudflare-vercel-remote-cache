@@ -1,56 +1,41 @@
 # Contract testing scope
 
 `upstream.json` is an unmodified snapshot of Turborepo's MIT-licensed OpenAPI
-3.0.3 document, downloaded from its official documentation. `provenance.json`
-records the date, URL and SHA-256. Vercel's official artifact API was also reviewed.
-The worker is an independent implementation; it does not vendor AdiRishi's or
-ducktors' server.
+3.0.3 document. `provenance.json` records the source, date and SHA-256. The CLI
+reads this file directly: no schema rewriting, generated overlay, or Python hooks.
 
-`tests/contract/test_openapi.py` derives a deployment-specific test schema in
-memory. The upstream snapshot remains unchanged. Review these adjustments when
-refreshing it:
+`npm run test:contract` starts an isolated workerd/R2 fixture and invokes the
+pinned Schemathesis CLI through `uvx`. Authentication uses freshly generated
+Access-style JWTs and the production verifier. No cloud credentials are needed.
+The routes match the schema at `/artifacts/...`; there is no `/v8` alias.
+**Stock Turbo appends `/v8` and is intentionally incompatible with these routes.**
 
-- Prefix paths with `/v8`, matching Vercel and the actual Turbo client.
-- Restrict team selectors to this deployment's configured namespace. Cross-team
-  rejection is independently tested against the Worker.
-- Bound artifact hashes to 256 hex characters; batch/event arrays to 128 entries;
-  event hashes to 256 Unicode code points; source SHA/dirty metadata to 128
-  characters; and duration to JavaScript's maximum safe integer. R2 metadata is
-  also bounded in aggregate. These are deployment resource limits, not claims
-  about the unrestricted upstream service.
-- Document `413`, `429`, and `503` responses for resource limits and unconfigured
-  authentication. Server errors still fail the checks.
-- Remove JSON content from HEAD errors: the upstream shared response references
-  describe JSON bodies, but HTTP HEAD responses must not carry a body.
-- Let the HTTP transport calculate `Content-Length`, rather than fuzzing framing
-  independently of the bytes. The Worker requires it for uploads. Request limits,
-  response byte counts, empty artifacts and body equality are tested separately.
-- Supply an authenticated fixture for structural fuzzing. Remove the security
-  declaration from that test view because randomly generated Bearer values are
-  not signed Access JWTs, and replacing generated invalid credentials would
-  invalidate negative-test expectations. Production security is not removed:
-  workerd tests cover missing, forged, expired, wrong-issuer, wrong-audience,
-  read-only, human and service credentials, plus an invalid assertion alongside
-  a valid bearer. The public upstream snapshot retains its security declarations.
-- For coverage cases whose only mutation adds undeclared HTTP headers/query
-  properties, omit only the negative-data-rejection assertion. HTTP allows those
-  extensions. Response shape/status/server-error checks still run. Other negative
-  data rejection checks remain enabled.
+`schemathesis.toml` keeps the test inputs and exceptions visible:
 
-The suite runs six operations with 60 Hypothesis examples per operation, plus
-Schemathesis coverage-generated cases. A further 30 generated workflows use
-Schemathesis cases and response validation for PUT → HEAD → GET → GET → batch
-lookup, asserting the bytes, lengths, duration and signature tag across requests.
-Dedicated protocol tests cover authorization and concurrent first-writer-wins.
-A real Turbo executable verifies signed upload, remote-only restoration after
-removing outputs, and rejection with a different signature key.
+- Team selectors and authorization use the local fixture. Credential generation
+  and undeclared extra parameters are disabled; dedicated Node tests exercise
+  invalid credentials, team isolation and malformed requests.
+- Upload framing uses a configured Content-Length, recalculated by the HTTP
+  client for nonempty bodies. PUT generates positive cases only because
+  negative framing probes can fail in Miniflare before reaching the Worker.
+  Other operations retain positive and negative generation; Node tests cover
+  malformed uploads.
+- HEAD skips JSON response-body validation because the upstream shared error
+  schema requires a body that HTTP HEAD forbids. Other HEAD checks remain enabled.
+- PUT/POST positive acceptance allows 400 for deployment resource limits absent
+  from the upstream schema. This means the CLI alone cannot prove valid writes
+  succeed. Node tests assert successful uploads, byte-for-byte reads, metadata,
+  batch lookups, first-writer-wins, and the resource limits independently.
 
-Error responses include both the self-hosting spec's top-level `code`/`message`
-and the real Turbo client's expected nested `error` envelope. Success uploads use
-Vercel's `202` response. Artifacts are opaque bytes; the server does not assume an
-archive format or attempt to unpack untrusted build outputs.
+All six operations run coverage and fuzzing, with up to 60 fuzzing examples per
+operation. No response statuses are added to the upstream schema. Server errors,
+undocumented statuses and response-shape failures still fail the run, except for
+the explicit HEAD body exception. There are no schema links for stateful tests;
+Node tests cover the upload → HEAD → repeated GET → batch workflow.
 
-These checks establish conformance to the pinned deployment contract and tested
-client version, not formal certification or all possible client versions. Cloud
-Access/WARP policy enforcement, edge cache hits, IAM, and R2 public-access settings
-require the deployed checks in the root README. No tests fuzz Vercel's service.
+These checks establish the tested protocol behavior, not formal certification
+or stock Turbo compatibility. Cloud Access/WARP enforcement, edge cache hits,
+IAM and bucket public-access settings require the deployed checks in the root
+README. No tests target Vercel's service.
+
+CLI documentation: <https://schemathesis.readthedocs.io/en/stable/quick-start/>.

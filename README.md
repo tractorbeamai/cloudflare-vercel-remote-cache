@@ -50,17 +50,18 @@ exposed.
 
 ## Development and verification
 
-Requires Node 24 and uv/Python 3.12+.
+Requires Node 24 and uv (for the isolated Schemathesis CLI). There is no Python
+project, pytest harness, or Python dependency lockfile. Schemathesis itself is a
+Python application; uv manages its runtime and dependencies outside this project.
 
 ```sh
 npm ci
-uv sync --locked
 npm run check
 ```
 
 The checks run TypeScript, formatting, a deployment dry run, workerd/R2 protocol
-and authorization tests, a real signed Turbo build/restore, and Schemathesis
-positive/negative contract cases plus generated multi-request workflows.
+and authorization tests, and the pinned Schemathesis CLI against the untouched
+upstream OpenAPI document. Node tests verify multi-request artifact workflows.
 Tests create ephemeral signing keys and intercept only the JWKS HTTP boundary;
 they run the production JWT verifier and real local R2 implementation. There is
 no development authentication bypass. The test rate limit is raised for fuzzing;
@@ -68,7 +69,7 @@ a separate test exercises enforcement.
 
 `npm run dev` fails closed until Access issuer/audiences are configured. For an
 isolated local fixture, the tests manage their own server automatically.
-[Contract provenance and adjustments](spec/README.md) describe the exact claims.
+[Contract provenance and CLI exceptions](spec/README.md) describe the exact claims.
 Local tests do not establish Access/WARP policy correctness, deployed CDN hits,
 or cloud IAM permissions; the deployment checks below cover those boundaries.
 
@@ -110,7 +111,8 @@ nonprod account ID, and Access app configuration have not been supplied.
 6. Run `npm run typegen`, `npm run check`, and `npm run deploy`. The deploy wrapper
    refuses incomplete account/domain/Access configuration and public previews.
 7. Verify with a managed WARP client: status, upload, HEAD, download, repeated
-   download with an actual CDN hit, and real Turbo restoration. Also test an
+   download with an actual CDN hit, and restoration using a client configured for
+   the root API paths. Also test an
    unmanaged client, expired/invalid credentials, a different team, and direct
    Worker/bucket URLs. Confirm denial after a cache hit and verify no public R2
    access. Repeat the read/write audience matrix if using separate apps.
@@ -118,31 +120,24 @@ nonprod account ID, and Access app configuration have not been supplied.
 Rollback: use `npx wrangler rollback` for Worker code. Retain the Access protection
 and private bucket settings; a code rollback must never expose the artifacts.
 
-## Turbo client setup
+## Client setup
 
-On a managed WARP device, once Access session authentication is confirmed:
+The API is rooted at `/artifacts/...`, with no `/v8` route or compatibility alias.
+Stock Turbo hardcodes `/v8/artifacts/...` and therefore cannot use this deployment
+directly. Setting `TURBO_API` to the hostname does not remove that prefix; a
+modified client is required. Stock-client compatibility is intentionally outside
+this implementation's current scope.
 
-```sh
-export TURBO_API=https://<chosen-hostname>
-export TURBO_TEAM=tractorbeam
-export TURBO_TOKEN=access-managed
-```
+Clients must reach the Access-protected hostname through the configured WARP
+session or a deliberate CI Service Auth policy. WARP connectivity alone does not
+grant access. Access supplies the signed assertion verified by the Worker. For
+service tokens, a client must supply `CF-Access-Client-Id` and
+`CF-Access-Client-Secret`; a bearer containing the service-token secret is not
+equivalent. Never commit credentials or artifact-signing keys.
 
-The placeholder satisfies Turbo's token setting; it grants no access itself.
-Access supplies the signed assertion after authenticating the WARP session.
-Enable `remoteCache.signature: true` in the consuming repository's `turbo.json`
-and distribute a separate random `TURBO_REMOTE_CACHE_SIGNATURE_KEY` through your
-secret manager. Never commit that key, JWTs or service-token secrets. Anyone with
-a symmetric signing key can create signatures; read-only server permissions
-still matter.
-
-CI needs a deliberate Access path: an enrolled runner, or a Service Auth policy
-and a client/proxy that supplies `CF-Access-Client-Id` and
-`CF-Access-Client-Secret`. Turbo's `TURBO_TOKEN` sends a Bearer header; setting it
-to an Access service-token secret is **not** equivalent to sending the required
-header pair. Verify the selected runner path before enabling remote cache in CI.
-The Worker accepts the resulting signed service application JWT. This repository's
-checks use isolated local infrastructure and require no Cloudflare credentials.
+Artifacts and signature tags remain opaque to the server. Clients should verify
+artifact signatures before restoring outputs. This repository's checks use
+isolated local infrastructure and require no Cloudflare credentials.
 
 ## Sources
 

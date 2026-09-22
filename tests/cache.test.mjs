@@ -9,7 +9,7 @@ before(async () => {
 after(async () => {
   await h?.close();
 });
-const path = (id) => `/v8/artifacts/${id}`;
+const path = (id) => `/artifacts/${id}`;
 const upload = (id, body, headers = {}) =>
   h.request(path(id), {
     method: "PUT",
@@ -26,7 +26,10 @@ test("artifact bytes and metadata survive upload, HEAD, repeated GET and batch q
     "x-artifact-sha": "abc",
     "x-artifact-dirty-hash": "def",
   };
-  assert.equal((await upload(id, body, metadata)).status, 202);
+  const stored = await upload(id, body, metadata);
+  assert.equal(stored.status, 202);
+  const { urls } = await stored.json();
+  assert.equal(new URL(urls[0]).pathname, path(id));
   for (const method of ["HEAD", "GET", "GET"]) {
     const response = await h.request(path(id), { method });
     assert.equal(response.status, 200);
@@ -39,7 +42,7 @@ test("artifact bytes and metadata survive upload, HEAD, repeated GET and batch q
       method === "HEAD" ? Buffer.alloc(0) : body,
     );
   }
-  const result = await h.request("/v8/artifacts", {
+  const result = await h.request("/artifacts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ hashes: [id, "000000"] }),
@@ -158,7 +161,7 @@ test("malformed requests are rejected and empty binary artifacts round-trip", as
   );
   assert.equal(
     (
-      await h.request("/v8/artifacts", {
+      await h.request("/artifacts", {
         method: "POST",
         body: "{",
         headers: { "Content-Type": "application/json" },
@@ -178,22 +181,19 @@ test("R2 metadata boundaries return client errors instead of storage failures", 
 });
 
 test("unsupported methods return 405 and an Allow header", async () => {
-  const response = await h.request("/v8/artifacts/status", { method: "POST" });
+  const response = await h.request("/artifacts/status", { method: "POST" });
   assert.equal(response.status, 405);
   assert.equal(response.headers.get("Allow"), "GET");
 });
 
 test("Access assertion works without a bearer and absent Access config fails closed", async () => {
-  const response = await fetch(`${h.url}/v8/artifacts/status`, {
+  const response = await fetch(`${h.url}/artifacts/status`, {
     headers: { "Cf-Access-Jwt-Assertion": h.token },
   });
   assert.equal(response.status, 200);
   const unconfigured = await startHarness({ ACCESS_READ_AUD: "" });
   try {
-    assert.equal(
-      (await unconfigured.request("/v8/artifacts/status")).status,
-      503,
-    );
+    assert.equal((await unconfigured.request("/artifacts/status")).status, 503);
   } finally {
     await unconfigured.close();
   }
@@ -202,14 +202,14 @@ test("Access assertion works without a bearer and absent Access config fails clo
 test("configured artifact and JSON limits reject requests without creating artifacts", async () => {
   const limited = await startHarness({ MAX_ARTIFACT_BYTES: 4 });
   try {
-    const response = await limited.request("/v8/artifacts/a18", {
+    const response = await limited.request("/artifacts/a18", {
       method: "PUT",
       body: "12345",
       headers: { "Content-Type": "application/octet-stream" },
     });
     assert.equal(response.status, 413);
-    assert.equal((await limited.request("/v8/artifacts/a18")).status, 404);
-    const json = await limited.request("/v8/artifacts/events", {
+    assert.equal((await limited.request("/artifacts/a18")).status, 404);
+    const json = await limited.request("/artifacts/events", {
       method: "POST",
       body: " ".repeat(65537),
       headers: { "Content-Type": "application/json" },
@@ -224,7 +224,7 @@ test("service-token identities are accepted only with a signed application JWT",
   const token = await h.sign({ sub: "", common_name: "test-client.access" });
   assert.equal(
     (
-      await h.request("/v8/artifacts/status", {
+      await h.request("/artifacts/status", {
         headers: { Authorization: `Bearer ${token}` },
       })
     ).status,
@@ -233,7 +233,7 @@ test("service-token identities are accepted only with a signed application JWT",
   const invalid = await h.sign({ sub: "" });
   assert.equal(
     (
-      await h.request("/v8/artifacts/status", {
+      await h.request("/artifacts/status", {
         headers: { Authorization: `Bearer ${invalid}` },
       })
     ).status,
@@ -243,7 +243,7 @@ test("service-token identities are accepted only with a signed application JWT",
   try {
     assert.equal(
       (
-        await h.request("/v8/artifacts/status", {
+        await h.request("/artifacts/status", {
           headers: { Authorization: `Bearer ${other.token}` },
         })
       ).status,
@@ -257,13 +257,13 @@ test("service-token identities are accepted only with a signed application JWT",
 test("rate limit is enforced per verified identity", async () => {
   const limited = await startHarness({}, { rateLimit: 2 });
   try {
-    assert.equal((await limited.request("/v8/artifacts/status")).status, 200);
-    assert.equal((await limited.request("/v8/artifacts/status")).status, 200);
-    assert.equal((await limited.request("/v8/artifacts/status")).status, 429);
+    assert.equal((await limited.request("/artifacts/status")).status, 200);
+    assert.equal((await limited.request("/artifacts/status")).status, 200);
+    assert.equal((await limited.request("/artifacts/status")).status, 429);
     const token = await limited.sign({ sub: "other-user" });
     assert.equal(
       (
-        await limited.request("/v8/artifacts/status", {
+        await limited.request("/artifacts/status", {
           headers: { Authorization: `Bearer ${token}` },
         })
       ).status,
@@ -271,5 +271,31 @@ test("rate limit is enforced per verified identity", async () => {
     );
   } finally {
     await limited.close();
+  }
+});
+
+test("root API has no v8 compatibility route", async () => {
+  assert.equal((await h.request("/artifacts/status")).status, 200);
+  assert.equal((await h.request("/v8/artifacts/status")).status, 404);
+  assert.equal(
+    (await h.request("/v8/artifacts/a11", { method: "PUT", body: "x" })).status,
+    404,
+  );
+});
+
+test("binary artifacts retain exact bytes across boundary sizes", async () => {
+  for (const length of [0, 1, 2, 255, 256, 4095, 4096, 65536]) {
+    const id = randomBytes(16).toString("hex");
+    const body = randomBytes(length);
+    assert.equal((await upload(id, body)).status, 202);
+    for (const method of ["HEAD", "GET", "GET"]) {
+      const response = await h.request(path(id), { method });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Content-Length"), String(length));
+      assert.deepEqual(
+        Buffer.from(await response.arrayBuffer()),
+        method === "HEAD" ? Buffer.alloc(0) : body,
+      );
+    }
   }
 });

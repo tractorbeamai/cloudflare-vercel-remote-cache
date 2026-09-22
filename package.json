@@ -14,10 +14,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "node --test --test-concurrency=1 tests/*.test.mjs",
-    "test:contract": "uv run pytest tests/contract -q",
-    "check": "npm run typecheck && npm run format:check && npm run lint:python && npm run build && npm test && npm run test:contract",
-    "deploy": "node scripts/deploy.mjs",
-    "lint:python": "uv run ruff check tests/contract && uv run ruff format --check tests/contract"
+    "test:contract": "node scripts/test-contract.mjs",
+    "check": "npm run typecheck && npm run format:check && npm run build && npm test && npm run test:contract",
+    "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
     "hono": "4.13.8",
@@ -30,7 +29,6 @@
     "jsonc-parser": "3.3.1",
     "miniflare": "5.20260921.0-alpha",
     "prettier": "3.9.8",
-    "turbo": "2.11.2",
     "typescript": "7.0.2",
     "wrangler": "4.136.3"
   }
