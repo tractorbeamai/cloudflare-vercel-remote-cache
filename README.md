@@ -28,7 +28,7 @@ selectors are rejected. The hostname does not grant project permission. Reads
 and writes use the same group check. R2 keys include the authorized project, so
 identical hashes in different projects remain independent.
 
-`vars.PROJECTS` in [wrangler.json](wrangler.json) must match the applied
+`vars.PROJECTS` in [wrangler.jsonc](wrangler.jsonc) must match the applied
 `remote_cache_project_groups` Terraform output. Deploy the Worker after every
 project flag or group-name change. **Disabling a project is complete only after
 the Worker map is updated.** Someone who also belongs to an enabled project can
@@ -39,7 +39,7 @@ headroom under Cloudflare's approximate 1 KB custom-claim limit.
 Access service tokens do not have human group memberships. `SERVICE_PROJECTS` is
 empty by default, so the Worker rejects them. If CI access is later needed, add a
 narrow Service Auth policy in infra and map that token's public client ID to only
-its enabled project keys in `wrangler.json`. The secret does not belong in Git.
+its enabled project keys in `wrangler.jsonc`. The secret does not belong in Git.
 
 ## Storage and limits
 
@@ -75,7 +75,7 @@ Local tests do not establish live Access or WARP behavior.
 
 `pnpm deploy` creates or updates the Worker, its route, bindings, rate-limit
 configuration, observability settings and non-secret variables from
-`wrangler.json`. Terraform does not track those Worker-owned settings. Infra
+`wrangler.jsonc`. Terraform does not track those Worker-owned settings. Infra
 owns the Access application, Okta claim forwarding, R2 bucket, privacy and
 retention. The R2 binding names that existing bucket; it does not request
 Wrangler's automatic bucket provisioning. No custom setup or deployment
