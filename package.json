@@ -15,8 +15,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
     "test:contract": "node scripts/test-contract.mjs",
-    "check": "pnpm typecheck && pnpm format:check && pnpm build && pnpm test && pnpm test:contract",
+    "check": "pnpm typecheck && pnpm format:check && pnpm build && pnpm test && pnpm test:integration && pnpm test:contract",
     "deploy": "wrangler deploy --minify"
   },
   "dependencies": {
@@ -30,6 +31,7 @@
     "esbuild": "0.28.2",
     "miniflare": "5.20260921.0-alpha",
     "prettier": "3.9.8",
+    "turbo": "2.11.3",
     "typescript": "7.0.2",
     "vitest": "4.1.0",
     "wrangler": "4.136.3"

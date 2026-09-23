@@ -7,8 +7,9 @@ reads this file directly: no schema rewriting, generated overlay, or Python hook
 `pnpm test:contract` starts an isolated workerd/R2 fixture and invokes the
 pinned Schemathesis CLI through `uvx`. Authentication uses freshly generated
 Access-style JWTs and the production verifier. No cloud credentials are needed.
-The routes match the schema at `/artifacts/...`; there is no `/v8` alias.
-**Stock Turbo appends `/v8` and is intentionally incompatible with these routes.**
+The canonical routes match the schema at `/artifacts/...`. The Worker also
+accepts `/v8/artifacts/...` for stock Turbo; the real Turbo CLI test covers
+that compatibility path.
 
 `schemathesis.toml` keeps the test inputs and exceptions visible:
 
@@ -33,9 +34,9 @@ undocumented statuses and response-shape failures still fail the run, except for
 the explicit HEAD body exception. There are no schema links for stateful tests;
 Vitest tests cover the upload → HEAD → repeated GET → batch workflow.
 
-These checks establish the tested protocol behavior, not formal certification
-or stock Turbo compatibility. Cloud Access/WARP enforcement,
-IAM and bucket public-access settings require the deployed checks in the root
-README. No tests target Vercel's service.
+These checks establish the tested protocol behavior, not formal certification.
+The real Turbo test establishes local CLI compatibility. Cloud Access/WARP
+enforcement, IAM and bucket public-access settings require the deployed checks
+in the root README. No tests target Vercel's service.
 
 CLI documentation: <https://schemathesis.readthedocs.io/en/stable/quick-start/>.

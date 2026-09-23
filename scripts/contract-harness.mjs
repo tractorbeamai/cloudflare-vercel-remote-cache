@@ -102,6 +102,7 @@ export async function startHarness(overrides = {}, options = {}) {
     token,
     sign,
     close: () => mf.dispose(),
+    rawRequest: (path, init = {}) => fetch(new URL(path, url), init),
     request: (path, init = {}) => {
       const target = new URL(path, url);
       if (

@@ -5,6 +5,7 @@ import { authenticate, fail } from "./auth";
 
 type App = { Bindings: Env; Variables: { teamId: string } };
 const app = new Hono<App>();
+const routes = new Hono<App>();
 const encoder = new TextEncoder();
 const hashSchema = z
   .string()
@@ -64,12 +65,13 @@ app.use("*", async (c, next) => {
     key: `${identity.teamId}:${identity.subject}`,
   });
   if (!limited.success) fail(429, "rate_limited", "Request limit exceeded");
+  const path = url.pathname.replace(/^\/v8(?=\/)/, "");
   const methods =
-    url.pathname === "/artifacts/status"
+    path === "/artifacts/status"
       ? ["GET"]
-      : ["/artifacts", "/artifacts/events"].includes(url.pathname)
+      : ["/artifacts", "/artifacts/events"].includes(path)
         ? ["POST"]
-        : /^\/artifacts\/[^/]+$/.test(url.pathname)
+        : /^\/artifacts\/[^/]+$/.test(path)
           ? ["GET", "HEAD", "PUT"]
           : undefined;
   if (methods && !methods.includes(c.req.method)) {
@@ -149,14 +151,14 @@ async function jsonBody(request: Request): Promise<unknown> {
   }
 }
 
-app.get("/artifacts/status", (c) => c.json({ status: "enabled" }));
-app.post("/artifacts/events", async (c) => {
+routes.get("/artifacts/status", (c) => c.json({ status: "enabled" }));
+routes.post("/artifacts/events", async (c) => {
   if (!eventSchema.safeParse(await jsonBody(c.req.raw)).success)
     fail(400, "invalid_events", "Invalid cache events");
   // Acknowledge telemetry without storing potentially sensitive build information.
   return c.json({});
 });
-app.post("/artifacts", async (c) => {
+routes.post("/artifacts", async (c) => {
   const parsed = querySchema.safeParse(await jsonBody(c.req.raw));
   if (!parsed.success) fail(400, "invalid_query", "Invalid artifact query");
   const entries: [string, unknown][] = [];
@@ -178,7 +180,7 @@ app.post("/artifacts", async (c) => {
   }
   return c.json(Object.fromEntries(entries));
 });
-app.put("/artifacts/:hash", async (c) => {
+routes.put("/artifacts/:hash", async (c) => {
   const value = hash(c.req.param("hash"));
   if (
     c.req.header("Content-Type")?.split(";")[0].trim() !==
@@ -226,11 +228,12 @@ app.put("/artifacts/:hash", async (c) => {
       customMetadata,
     },
   );
-  const url = new URL(`/artifacts/${value}`, c.req.url);
+  const prefix = c.req.path.startsWith("/v8/") ? "/v8" : "";
+  const url = new URL(`${prefix}/artifacts/${value}`, c.req.url);
   url.searchParams.set("teamId", c.get("teamId"));
   return c.json({ urls: [url.toString()] }, 202);
 });
-app.on(["GET", "HEAD"], "/artifacts/:hash", async (c) => {
+routes.on(["GET", "HEAD"], "/artifacts/:hash", async (c) => {
   const value = hash(c.req.param("hash"));
   if (c.req.method === "HEAD") {
     const object = await c.env.ARTIFACTS.head(key(c.get("teamId"), value));
@@ -241,5 +244,8 @@ app.on(["GET", "HEAD"], "/artifacts/:hash", async (c) => {
   if (!object) fail(404, "not_found", "Artifact not found");
   return new Response(object.body, { headers: headers(object) });
 });
+
+app.route("/", routes);
+app.route("/v8", routes);
 
 export default app;

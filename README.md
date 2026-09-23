@@ -65,9 +65,11 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Checks include TypeScript, formatting, a Wrangler dry run, Vitest protocol and
-security tests in Cloudflare's Workers runtime with local R2, and Schemathesis against the unchanged upstream
-OpenAPI document. Test fixtures sign ephemeral JWTs and mock only JWKS retrieval.
+Checks include TypeScript, formatting, a Wrangler dry run, HTTP-level Vitest
+protocol and security tests against local workerd and R2, a real Turbo CLI cache
+miss and remote hit, a small Cloudflare Vitest runtime check, and Schemathesis
+against the unchanged upstream OpenAPI document. Test fixtures sign ephemeral
+JWTs and mock only JWKS retrieval.
 [Contract provenance and exceptions](spec/README.md) describe the coverage.
 Local tests do not establish live Access or WARP behavior.
 
@@ -104,15 +106,15 @@ and private bucket settings in place when rolling back Worker code.
 
 ## Client setup
 
-The API is rooted at `/artifacts/...`, with no `/v8` compatibility route.
-Stock Turbo hardcodes `/v8/artifacts/...`, so a modified client is required;
-setting `TURBO_API` does not remove that prefix.
+The canonical API is rooted at `/artifacts/...`. The Worker also accepts
+`/v8/artifacts/...` for stock Turbo, which appends `/v8` to `TURBO_API`.
 
-A client for CADDi uses `https://caddi.cache.tractorbeam.tools` with
-`teamId=caddi`. Access supplies the signed `Cf-Access-Jwt-Assertion`; it takes
-precedence over any bearer token. A signed application JWT can also be supplied
-as a bearer for protocol testing. An invalid assertion cannot fall back to a
-valid bearer. Clients should verify artifact signatures before restoring outputs.
+A client for CADDi uses `TURBO_API=https://caddi.cache.tractorbeam.tools`,
+`TURBO_TEAM=caddi`, and a signed Access application JWT as `TURBO_TOKEN`.
+Access's `Cf-Access-Jwt-Assertion` takes precedence over that bearer token.
+The local real-Turbo test uses this setup. An invalid assertion cannot fall
+back to a valid bearer. Clients should verify artifact signatures before
+restoring outputs.
 
 ## Sources
 
