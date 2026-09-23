@@ -1,0 +1,39 @@
+{
+  "name": "@tractorbeam/cloudflare-vercel-remote-cache",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "typegen": "wrangler types --strict-vars=false",
+    "typecheck": "pnpm typegen && tsc --noEmit",
+    "build": "wrangler deploy --dry-run --minify --outdir dist",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mjs",
+    "test:contract": "node scripts/test-contract.mjs",
+    "check": "pnpm typecheck && pnpm format:check && pnpm build && pnpm test && pnpm test:integration && pnpm test:contract",
+    "deploy": "wrangler deploy --minify"
+  },
+  "dependencies": {
+    "hono": "4.13.8",
+    "jose": "6.2.12",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.2.3",
+    "@types/node": "26.6.2",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20260921.0-alpha",
+    "prettier": "3.9.8",
+    "turbo": "2.11.3",
+    "typescript": "7.0.2",
+    "vitest": "4.1.0",
+    "wrangler": "4.136.3"
+  }
+}
