@@ -35,8 +35,9 @@ the explicit HEAD body exception. There are no schema links for stateful tests;
 Vitest tests cover the upload → HEAD → repeated GET → batch workflow.
 
 These checks establish the tested protocol behavior, not formal certification.
-The real Turbo test establishes local CLI compatibility. Cloud Access/WARP
-enforcement, IAM and bucket public-access settings require the deployed checks
-in the root README. No tests target Vercel's service.
+The real Turbo test covers both unsigned and signed local CLI artifacts with
+preflight disabled. Cloud Access/WARP enforcement, IAM and bucket public-access
+settings require the deployed checks in the root README. No tests target
+Vercel's service.
 
 CLI documentation: <https://schemathesis.readthedocs.io/en/stable/quick-start/>.

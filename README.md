@@ -116,6 +116,15 @@ The local real-Turbo test uses this setup. An invalid assertion cannot fall
 back to a valid bearer. Clients should verify artifact signatures before
 restoring outputs.
 
+Use `TURBO_TEAM` (the project slug) rather than `TURBO_TEAMID`: Turbo accepts a
+team ID only when it begins with `team_`, while our project keys do not. Clients
+may set `remoteCache.signature: true` and share a secret of at least 32 bytes
+through `TURBO_REMOTE_CACHE_SIGNATURE_KEY`; the Worker preserves the resulting
+`x-artifact-tag`. Turbo caches task logs along with outputs, so tasks must not
+print secrets. Keep `remoteCache.preflight` at its default `false`: in the tested
+Turbo 2.11.3 flow, enabling it sends the bearer token on `OPTIONS` but omits it
+from the following artifact request, which this Worker correctly denies.
+
 ## Sources
 
 - [Turborepo remote-cache specification](https://turborepo.dev/api/remote-cache-spec)
