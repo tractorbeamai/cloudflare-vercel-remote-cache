@@ -15,15 +15,16 @@ flowchart LR
 ## Authorization
 
 The nonprod [infra stack](https://github.com/tractorbeamai/infra/pull/1541)
-stages exact project hostnames and one Worker-level Access application. Its Allow policy
-admits the existing Okta groups of projects with `remote_cache: true` in
-`infra/data/projects.json`. The nonprod Okta integration forwards a filtered
+stages exact project hostnames and one Worker-level Access application. Only
+Constellation is enabled initially; setting `remote_cache: true` on another
+project in `infra/data/projects.json` adds its hostname and Okta group to the
+Access policy after the staged rollout. The nonprod Okta integration forwards a filtered
 `Project: ` groups claim. The Worker verifies the application JWT's signature,
 issuer, audience, expiry and identity, then requires the exact project group in
 its signed `custom.groups` claim. Missing, malformed and oversized claims deny
 access. Caller-supplied group headers never grant permission.
 
-`teamId` is a project key such as `caddi` or `linden-investment`; `slug` is an
+`teamId` is an enabled project key such as `constellation`; `slug` is an
 alternative selector. At least one is required, and duplicates or conflicting
 selectors are rejected. The hostname does not grant project permission. Reads
 and writes use the same group check. R2 keys include the authorized project, so
@@ -86,29 +87,29 @@ The R2 binding names the existing bucket.
    through its normal workflow. It stages the bucket and custom hostnames with
    routes disabled. Apply the corporate DNS records and verify every hostname's
    TLS certificate is active.
-2. Use an authorized nonprod Wrangler session or scoped API token to run
-   `pnpm check` and `pnpm deploy`. The initial `ACCESS_AUD` is empty, so the
-   unrouted Worker fails closed. `workers_dev` and previews are disabled.
+2. Connect this repository to nonprod Workers Builds on `main`, as with Handbook.
+   Set its deploy command to `pnpm deploy` and disable preview builds; the
+   existing GitHub checks run `pnpm check`. The initial `ACCESS_AUD` is empty,
+   so the unrouted Worker fails closed. `workers_dev` and preview URLs are disabled.
 3. Enable `remote_cache_routing_enabled` in the nonprod infra stack only after
    the Worker exists and the hostnames are active. Apply its Worker-level Access
    app and exact routes, then copy `remote_cache_access_aud` and
    `remote_cache_project_groups` into `wrangler.jsonc` and redeploy.
 4. Verify anonymous denial, a fresh WARP session's signed `custom.groups`,
-   allowed access and cross-project denial on two hostnames, and disabled direct
-   R2 and alternate Worker access.
+   allowed Constellation access, rejection of an unauthorized project, and
+   disabled direct R2 and alternate Worker access.
 
 Current status: not deployed. The empty `ACCESS_AUD` leaves the Worker fail
-closed until the Access app is applied and its audience is copied. The Cloudflare
-connector can inspect corporate resources but is not authorized for nonprod
-account resources, and Wrangler has no usable login/API token.
+closed until the Access app is applied and its audience is copied. Nonprod
+Workers Builds must be connected to this repository before the first deployment.
 
 ## Client setup
 
 The canonical API is rooted at `/artifacts/...`. The Worker also accepts
 `/v8/artifacts/...` for stock Turbo, which appends `/v8` to `TURBO_API`.
 
-A client for CADDi uses `TURBO_API=https://caddi.cache.tractorbeam.tools`,
-`TURBO_TEAM=caddi`, and a signed Access application JWT as `TURBO_TOKEN`.
+A client for Constellation uses `TURBO_API=https://constellation.cache.tractorbeam.tools`,
+`TURBO_TEAM=constellation`, and a signed Access application JWT as `TURBO_TOKEN`.
 Access's `Cf-Access-Jwt-Assertion` takes precedence over that bearer token.
 The local real-Turbo test uses this setup. An invalid assertion cannot fall
 back to a valid bearer. Clients should verify artifact signatures before

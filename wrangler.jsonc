@@ -22,14 +22,7 @@
     "SERVICE_PROJECTS": {},
     // Copy remote_cache_project_groups from the applied nonprod infra stack.
     "PROJECTS": {
-      "avathon": "Project: Avathon",
-      "caddi": "Project: CADDi",
-      "carlyle": "Project: Carlyle",
       "constellation": "Project: Constellation",
-      "linden-investment": "Project: Linden (Investment)",
-      "linden-tech": "Project: Linden (Tech)",
-      "soc-2": "Project: SOC 2",
-      "tempus": "Project: Tempus",
     },
   },
   "r2_buckets": [
