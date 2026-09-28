@@ -1,22 +1,23 @@
 # Cloudflare-native Turborepo remote cache
 
-Hono on Cloudflare Workers with private R2 storage and one corporate Cloudflare
-Access application. The Worker runs in the same Access organization as developer
-WARP enrollment.
+Hono on a nonprod Cloudflare Worker with private R2 storage and one nonprod
+Access application. Corporate owns the `tractorbeam.tools` DNS zone; exact
+project hostnames are served by nonprod through Cloudflare for SaaS.
 
 ```mermaid
 flowchart LR
-  Client[Developer on WARP] --> Access[Corporate Access application]
+  Client[Developer on WARP] --> DNS[Corporate DNS]
+  DNS --> Access[Nonprod Access application]
   Access --> Worker[Verify signed project membership]
   Worker --> R2[Private R2: project/hash]
 ```
 
 ## Authorization
 
-The corporate [infra stack](https://github.com/tractorbeamai/infra/pull/1541)
-creates one Access application for `*.cache.tractorbeam.tools`. Its Allow policy
+The nonprod [infra stack](https://github.com/tractorbeamai/infra/pull/1541)
+stages exact project hostnames and one Worker-level Access application. Its Allow policy
 admits the existing Okta groups of projects with `remote_cache: true` in
-`infra/data/projects.json`. The shared Okta integration forwards a filtered
+`infra/data/projects.json`. The nonprod Okta integration forwards a filtered
 `Project: ` groups claim. The Worker verifies the application JWT's signature,
 issuer, audience, expiry and identity, then requires the exact project group in
 its signed `custom.groups` claim. Missing, malformed and oversized claims deny
@@ -75,34 +76,31 @@ Local tests do not establish live Access or WARP behavior.
 
 ## Deployment
 
-`pnpm deploy` creates or updates the Worker, its route, bindings, rate-limit
+`pnpm deploy` creates or updates the nonprod Worker, R2 binding, rate-limit
 configuration, observability settings and non-secret variables from
-`wrangler.jsonc`. Terraform does not track those Worker-owned settings. Infra
-owns the Access application, Okta claim forwarding, R2 bucket, privacy and
-retention. The R2 binding names that existing bucket; it does not request
-Wrangler's automatic bucket provisioning. No custom setup or deployment
-orchestration is needed.
+`wrangler.jsonc`. Terraform owns exact SaaS hostnames, corporate DNS CNAMEs,
+Worker routes, Access, Okta claim forwarding, R2 privacy and retention.
+The R2 binding names the existing bucket.
 
 1. Apply [infra PR #1541](https://github.com/tractorbeamai/infra/pull/1541)
-   through its normal workflow. Copy `remote_cache_access_aud` into `vars.ACCESS_AUD`
-   and `remote_cache_project_groups` into `vars.PROJECTS` here. These values are
-   public configuration, not secrets.
-2. Authenticate a managed device again and verify its signed Access application
-   JWT includes the expected `custom.groups`. The app enables WARP authentication
-   explicitly; infra does not change the organization-wide setting.
-3. Establish corporate zone, proxy and TLS routing for
-   `*.cache.tractorbeam.tools`, preserving Route 53 DNS ownership. The Wrangler
-   route does not create a zone or change authoritative DNS.
-4. Use an authorized corporate Wrangler session or scoped API token, then run
-   `pnpm check` and `pnpm deploy`. Wrangler has `workers_dev` and previews
-   disabled. Test two projects with the same hash, absent group claims, direct
-   bucket access and alternate Worker URLs before considering rollout complete.
+   through its normal workflow. It stages the bucket and custom hostnames with
+   routes disabled. Apply the corporate DNS records and verify every hostname's
+   TLS certificate is active.
+2. Use an authorized nonprod Wrangler session or scoped API token to run
+   `pnpm check` and `pnpm deploy`. The initial `ACCESS_AUD` is empty, so the
+   unrouted Worker fails closed. `workers_dev` and previews are disabled.
+3. Enable `remote_cache_routing_enabled` in the nonprod infra stack only after
+   the Worker exists and the hostnames are active. Apply its Worker-level Access
+   app and exact routes, then copy `remote_cache_access_aud` and
+   `remote_cache_project_groups` into `wrangler.jsonc` and redeploy.
+4. Verify anonymous denial, a fresh WARP session's signed `custom.groups`,
+   allowed access and cross-project denial on two hostnames, and disabled direct
+   R2 and alternate Worker access.
 
-Current status: not deployed. The connected corporate API returned no
-`tractorbeam.tools` zone, Wrangler has no usable login/API token, and the shared
-identity change has not been applied. The empty `ACCESS_AUD` leaves the Worker
-fail closed until the actual Terraform output is copied. Keep the Access policy
-and private bucket settings in place when rolling back Worker code.
+Current status: not deployed. The empty `ACCESS_AUD` leaves the Worker fail
+closed until the Access app is applied and its audience is copied. The Cloudflare
+connector can inspect corporate resources but is not authorized for nonprod
+account resources, and Wrangler has no usable login/API token.
 
 ## Client setup
 
