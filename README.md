@@ -84,6 +84,10 @@ binding, rate limiter, observability settings, and non-secret variables from
 DNS CNAMEs, Worker routes, Access, Okta claim forwarding, R2 privacy, and
 retention. The R2 binding names the existing bucket.
 
+The Cloudflare Workers and Pages GitHub app must include this repository in its
+selected repositories. Builds uses the existing nonprod `handbook-workers-builds`
+API token; repository merges trigger deployment through Cloudflare.
+
 Only Constellation is enabled. To add a project, set `remote_cache: true` in
 `infra/data/projects.json`, apply its hostname and DNS through infra, and wait
 for the certificate to become active. Add the applied project/group mapping to
