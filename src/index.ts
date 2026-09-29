@@ -3,7 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { authenticate, fail } from "./auth";
 
-type App = { Bindings: Env; Variables: { teamId: string } };
+type App = { Bindings: Env; Variables: { teamId: string; subject: string } };
 const app = new Hono<App>();
 const routes = new Hono<App>();
 const encoder = new TextEncoder();
@@ -53,6 +53,7 @@ app.use("*", async (c, next) => {
   const identity = await authenticate(c.req.raw, c.env);
   const url = new URL(c.req.url);
   c.set("teamId", identity.teamId);
+  c.set("subject", identity.subject);
   const ci = c.req.header("x-artifact-client-ci");
   const interactive = c.req.header("x-artifact-client-interactive");
   if (
@@ -67,7 +68,7 @@ app.use("*", async (c, next) => {
   if (!limited.success) fail(429, "rate_limited", "Request limit exceeded");
   const path = url.pathname.replace(/^\/v8(?=\/)/, "");
   const methods =
-    path === "/artifacts/status"
+    path === "/auth/token" || path === "/artifacts/status"
       ? ["GET"]
       : ["/artifacts", "/artifacts/events"].includes(path)
         ? ["POST"]
@@ -89,6 +90,17 @@ app.use("*", async (c, next) => {
   await next();
   c.header("Cache-Control", "private, no-store");
   c.header("X-Content-Type-Options", "nosniff");
+});
+
+// Turbo accepts one bearer token, while Access service credentials use two
+// headers. Exchange a service-authenticated request for the short-lived,
+// project-authorized application JWT that Access passed to this Worker.
+app.get("/auth/token", (c) => {
+  if (!c.get("subject").startsWith("service:"))
+    fail(403, "forbidden", "A service identity is required");
+  const assertion = c.req.header("Cf-Access-Jwt-Assertion");
+  if (!assertion) fail(401, "unauthorized", "An Access assertion is required");
+  return c.text(assertion);
 });
 
 function hash(value: string): string {
