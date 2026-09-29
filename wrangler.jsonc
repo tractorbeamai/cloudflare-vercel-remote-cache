@@ -15,8 +15,8 @@
   "cache": { "enabled": false },
   "vars": {
     "ACCESS_ISSUER": "https://tractorbeam-nonprod.cloudflareaccess.com",
-    // Copy remote_cache_access_aud from the applied nonprod infra stack.
-    "ACCESS_AUD": "",
+    // Worker-level Access application audience from nonprod infra.
+    "ACCESS_AUD": "7ea8f6af1327a517f315182447cc3982dd8f7d22b8af0973bdedfdd69458a526",
     "MAX_ARTIFACT_BYTES": 67108864,
     // Add public service-token client IDs only alongside an Access Service Auth policy.
     "SERVICE_PROJECTS": {},

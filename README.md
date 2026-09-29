@@ -14,8 +14,8 @@ flowchart LR
 
 ## Authorization
 
-The nonprod [infra stack](https://github.com/tractorbeamai/infra/pull/1541)
-stages exact project hostnames and one Worker-level Access application. Only
+The nonprod [infra stack](https://github.com/tractorbeamai/infra/tree/main/cloudflare/nonprod)
+manages exact project hostnames and one Worker-level Access application. Only
 Constellation is enabled initially; setting `remote_cache: true` on another
 project in `infra/data/projects.json` adds its hostname and Okta group to the
 Access policy after the staged rollout. The nonprod Okta integration forwards a filtered
@@ -77,31 +77,20 @@ Local tests do not establish live Access or WARP behavior.
 
 ## Deployment
 
-`pnpm deploy` creates or updates the nonprod Worker, R2 binding, rate-limit
-configuration, observability settings and non-secret variables from
-`wrangler.jsonc`. Terraform owns exact SaaS hostnames, corporate DNS CNAMEs,
-Worker routes, Access, Okta claim forwarding, R2 privacy and retention.
-The R2 binding names the existing bucket.
+Nonprod Workers Builds deploys `main` with `pnpm deploy`; preview builds,
+`workers.dev`, and Worker preview URLs are disabled. The Worker deploys its R2
+binding, rate limiter, observability settings, and non-secret variables from
+`wrangler.jsonc`. Terraform owns the bucket, exact SaaS hostnames, corporate
+DNS CNAMEs, Worker routes, Access, Okta claim forwarding, R2 privacy, and
+retention. The R2 binding names the existing bucket.
 
-1. Apply [infra PR #1541](https://github.com/tractorbeamai/infra/pull/1541)
-   through its normal workflow. It stages the bucket and custom hostnames with
-   routes disabled. Apply the corporate DNS records and verify every hostname's
-   TLS certificate is active.
-2. Connect this repository to nonprod Workers Builds on `main`, as with Handbook.
-   Set its deploy command to `pnpm deploy` and disable preview builds; the
-   existing GitHub checks run `pnpm check`. The initial `ACCESS_AUD` is empty,
-   so the unrouted Worker fails closed. `workers_dev` and preview URLs are disabled.
-3. Enable `remote_cache_routing_enabled` in the nonprod infra stack only after
-   the Worker exists and the hostnames are active. Apply its Worker-level Access
-   app and exact routes, then copy `remote_cache_access_aud` and
-   `remote_cache_project_groups` into `wrangler.jsonc` and redeploy.
-4. Verify anonymous denial, a fresh WARP session's signed `custom.groups`,
-   allowed Constellation access, rejection of an unauthorized project, and
-   disabled direct R2 and alternate Worker access.
-
-Current status: not deployed. The empty `ACCESS_AUD` leaves the Worker fail
-closed until the Access app is applied and its audience is copied. Nonprod
-Workers Builds must be connected to this repository before the first deployment.
+Only Constellation is enabled. To add a project, set `remote_cache: true` in
+`infra/data/projects.json`, apply its hostname and DNS through infra, and wait
+for the certificate to become active. Add the applied project/group mapping to
+`PROJECTS` here, then apply its Access policy and route. Keep `ACCESS_AUD`
+equal to the nonprod `remote_cache_access_aud` output. Verify that anonymous
+requests are denied and that a member's signed `custom.groups` claim allows
+only their project.
 
 ## Client setup
 
