@@ -1,0 +1,10 @@
+node_modules
+pnpm-lock.yaml
+dist
+worker-configuration.d.ts
+spec/upstream.json
+.venv
+.wrangler
+reports
+
+.schemathesis/

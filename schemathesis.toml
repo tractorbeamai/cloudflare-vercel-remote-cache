@@ -1,0 +1,24 @@
+# Deployment inputs, not a rewritten OpenAPI document.
+[parameters]
+"query.teamId" = "caddi"
+"query.slug" = "caddi"
+
+[generation]
+max-examples = 60
+with-security-parameters = false
+allow-extra-parameters = false
+
+[[operations]]
+include-method = "HEAD"
+# Upstream declares JSON error bodies for HEAD, which HTTP forbids.
+checks.response_schema_conformance.enabled = false
+
+[[operations]]
+include-method-regex = "PUT|POST"
+# The upstream schema has no deployment resource bounds. Vitest tests enforce ours.
+checks.positive_data_acceptance.expected-statuses = ["2xx", 400, 401, 403, 404, 409, 429]
+
+[[operations]]
+include-method = "PUT"
+# Fixed framing cannot retain the generator's negative-header expectations.
+generation.mode = "positive"
