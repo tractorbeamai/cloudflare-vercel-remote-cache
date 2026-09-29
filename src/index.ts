@@ -3,7 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { authenticate, fail } from "./auth";
 
-type App = { Bindings: Env; Variables: { teamId: string; subject: string } };
+type App = { Bindings: Env; Variables: { teamId: string } };
 const app = new Hono<App>();
 const routes = new Hono<App>();
 const encoder = new TextEncoder();
@@ -53,7 +53,6 @@ app.use("*", async (c, next) => {
   const identity = await authenticate(c.req.raw, c.env);
   const url = new URL(c.req.url);
   c.set("teamId", identity.teamId);
-  c.set("subject", identity.subject);
   const ci = c.req.header("x-artifact-client-ci");
   const interactive = c.req.header("x-artifact-client-interactive");
   if (
@@ -92,12 +91,10 @@ app.use("*", async (c, next) => {
   c.header("X-Content-Type-Options", "nosniff");
 });
 
-// Turbo accepts one bearer token, while Access service credentials use two
-// headers. Exchange a service-authenticated request for the short-lived,
-// project-authorized application JWT that Access passed to this Worker.
+// Turbo accepts one bearer token, while Access authenticates clients through
+// WARP, cookies, or service credentials. Return the short-lived, project-
+// authorized application JWT that Access passed to this Worker.
 app.get("/auth/token", (c) => {
-  if (!c.get("subject").startsWith("service:"))
-    fail(403, "forbidden", "A service identity is required");
   const assertion = c.req.header("Cf-Access-Jwt-Assertion");
   if (!assertion) fail(401, "unauthorized", "An Access assertion is required");
   return c.text(assertion);

@@ -45,7 +45,7 @@ in AWS Secrets Manager for Constellation's GitHub OIDC role. After applying
 infra, copy `remote_cache_constellation_ci_client_id` into `SERVICE_PROJECTS` in
 `wrangler.jsonc` as `{ "<client-id>": ["constellation"] }` and deploy the Worker.
 The client secret does not belong in Git. Access protects `/auth/token` and
-returns a signed application JWT to the authenticated service. Turbo protocol
+returns a signed application JWT to an authorized user or service. Turbo protocol
 paths bypass Access's HTTP gate because Turbo sends that JWT in a Bearer header;
 the Worker verifies its signature, audience, and project on every request.
 
@@ -120,9 +120,14 @@ Present its `client_id` and `client_secret` to
 `GET /auth/token?teamId=constellation` as `CF-Access-Client-Id` and
 `CF-Access-Client-Secret` headers. The response body is the short-lived Access
 application JWT for `TURBO_TOKEN`; the Worker returns it only after validating
-Access's signed service assertion and the project scope. Set `TURBO_API` and
+Access's signed assertion and the project scope. Set `TURBO_API` and
 `TURBO_TEAM` as above. A connected WARP client alone does not give browserless
 CI a human project identity; the nonprod Access service credential supplies it.
+
+An authorized developer can call the same token endpoint through a valid WARP
+Access session to obtain `TURBO_TOKEN` without sending CI credentials. This
+depends on live confirmation that a corporate-enrolled WARP session is accepted
+by the nonprod Access application.
 
 Use `TURBO_TEAM` (the project slug) rather than `TURBO_TEAMID`: Turbo accepts a
 team ID only when it begins with `team_`, while our project keys do not. Clients

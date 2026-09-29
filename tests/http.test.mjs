@@ -135,14 +135,11 @@ test("CI exchanges its Access assertion for a Turbo bearer token scoped to its p
     ).status,
     401,
   );
-  assert.equal(
-    (
-      await h.rawRequest("/auth/token?teamId=caddi", {
-        headers: { "Cf-Access-Jwt-Assertion": h.token },
-      })
-    ).status,
-    403,
-  );
+  const member = await h.rawRequest("/auth/token?teamId=caddi", {
+    headers: { "Cf-Access-Jwt-Assertion": h.token },
+  });
+  assert.equal(member.status, 200);
+  assert.equal(await member.text(), h.token);
 });
 
 test("concurrent writes and retries preserve the first committed artifact", async () => {
