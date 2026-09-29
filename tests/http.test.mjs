@@ -94,6 +94,54 @@ test("team selectors require project permission", async () => {
   assert.equal((await h.request(path("a12") + "?slug=caddi")).status, 200);
 });
 
+test("CI exchanges its Access assertion for a Turbo bearer token scoped to its project", async () => {
+  const assertion = await h.sign({
+    sub: "",
+    common_name: "caddi-ci.access",
+    custom: undefined,
+  });
+  const exchanged = await h.rawRequest("/auth/token?teamId=caddi", {
+    headers: { "Cf-Access-Jwt-Assertion": assertion },
+  });
+  assert.equal(exchanged.status, 200);
+  assert.equal(exchanged.headers.get("Cache-Control"), "private, no-store");
+  const turboToken = await exchanged.text();
+  const stored = await h.rawRequest("/artifacts/c1?teamId=caddi", {
+    method: "PUT",
+    body: "CI artifact",
+    headers: {
+      Authorization: `Bearer ${turboToken}`,
+      "Content-Type": "application/octet-stream",
+    },
+  });
+  assert.equal(stored.status, 202);
+  const read = await h.rawRequest("/artifacts/c1?teamId=caddi", {
+    headers: { Authorization: `Bearer ${turboToken}` },
+  });
+  assert.equal(await read.text(), "CI artifact");
+  assert.equal(
+    (
+      await h.rawRequest("/auth/token?teamId=carlyle", {
+        headers: { "Cf-Access-Jwt-Assertion": assertion },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await h.rawRequest("/auth/token?teamId=caddi", {
+        headers: { Authorization: `Bearer ${assertion}` },
+      })
+    ).status,
+    401,
+  );
+  const member = await h.rawRequest("/auth/token?teamId=caddi", {
+    headers: { "Cf-Access-Jwt-Assertion": h.token },
+  });
+  assert.equal(member.status, 200);
+  assert.equal(await member.text(), h.token);
+});
+
 test("concurrent writes and retries preserve the first committed artifact", async () => {
   const writes = await Promise.all(
     ["first", "second"].map((body) => upload("a14", body)),

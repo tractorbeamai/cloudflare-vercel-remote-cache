@@ -11,6 +11,16 @@ const turbo = resolve("node_modules/.bin/turbo");
 
 beforeAll(async () => {
   cache = await startHarness();
+  const assertion = await cache.sign({
+    sub: "",
+    common_name: "caddi-ci.access",
+    custom: undefined,
+  });
+  const exchange = await cache.rawRequest("/auth/token?teamId=caddi", {
+    headers: { "Cf-Access-Jwt-Assertion": assertion },
+  });
+  expect(exchange.status).toBe(200);
+  cache.turboToken = await exchange.text();
   project = await mkdtemp(join(tmpdir(), "remote-cache-turbo-"));
   await mkdir(join(project, "src"));
   await writeFile(join(project, ".gitignore"), "dist/\n.turbo/\nfirst-run\n");
@@ -58,7 +68,7 @@ function runTurbo(marker, signatureKey) {
           ...process.env,
           TURBO_API: cache.url,
           TURBO_TEAM: "caddi",
-          TURBO_TOKEN: cache.token,
+          TURBO_TOKEN: cache.turboToken,
           TURBO_TELEMETRY_DISABLED: "1",
           TURBO_NO_UPDATE_NOTIFIER: "1",
           ...(signatureKey

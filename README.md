@@ -1,14 +1,15 @@
 # Cloudflare-native Turborepo remote cache
 
 Hono on a nonprod Cloudflare Worker with private R2 storage and one nonprod
-Access application. Corporate owns the `tractorbeam.tools` DNS zone; exact
-project hostnames are served by nonprod through Cloudflare for SaaS.
+Access application for identity issuance. Corporate owns the `tractorbeam.tools`
+DNS zone; exact project hostnames are served by nonprod through Cloudflare for
+SaaS.
 
 ```mermaid
 flowchart LR
-  Client[Developer on WARP] --> DNS[Corporate DNS]
-  DNS --> Access[Nonprod Access application]
-  Access --> Worker[Verify signed project membership]
+  Client[Developer or CI] --> Access[Nonprod Access: issue application JWT]
+  Access --> Turbo[Turbo Bearer token]
+  Turbo --> Worker[Worker: verify signed identity and project]
   Worker --> R2[Private R2: project/hash]
 ```
 
@@ -18,7 +19,7 @@ The nonprod [infra stack](https://github.com/tractorbeamai/infra/tree/main/cloud
 manages exact project hostnames and one Worker-level Access application. Only
 Constellation is enabled initially; setting `remote_cache: true` on another
 project in `infra/data/projects.json` adds its hostname and Okta group to the
-Access policy after the staged rollout. The nonprod Okta integration forwards a filtered
+token-issuance policy after the staged rollout. The nonprod Okta integration forwards a filtered
 `Project: ` groups claim. The Worker verifies the application JWT's signature,
 issuer, audience, expiry and identity, then requires the exact project group in
 its signed `custom.groups` claim. Missing, malformed and oversized claims deny
@@ -38,10 +39,15 @@ still pass Access admission with a stale Worker map. The shared identity config
 bounds all registered project group names below 700 bytes and 64 groups, leaving
 headroom under Cloudflare's approximate 1 KB custom-claim limit.
 
-Access service tokens do not have human group memberships. `SERVICE_PROJECTS` is
-empty by default, so the Worker rejects them. If CI access is later needed, add a
-narrow Service Auth policy in infra and map that token's public client ID to only
-its enabled project keys in `wrangler.jsonc`. The secret does not belong in Git.
+Access service tokens do not have human group memberships. The nonprod infra
+stack creates a Constellation-only Service Auth policy and stores its credential
+in AWS Secrets Manager for Constellation's GitHub OIDC role. After applying
+infra, copy `remote_cache_constellation_ci_client_id` into `SERVICE_PROJECTS` in
+`wrangler.jsonc` as `{ "<client-id>": ["constellation"] }` and deploy the Worker.
+The client secret does not belong in Git. Access protects `/auth/token` and
+returns a signed application JWT to an authorized user or service. Turbo protocol
+paths bypass Access's HTTP gate because Turbo sends that JWT in a Bearer header;
+the Worker verifies its signature, audience, and project on every request.
 
 ## Storage and limits
 
@@ -107,6 +113,21 @@ Access's `Cf-Access-Jwt-Assertion` takes precedence over that bearer token.
 The local real-Turbo test uses this setup. An invalid assertion cannot fall
 back to a valid bearer. Clients should verify artifact signatures before
 restoring outputs.
+
+For CI, use the existing GitHub OIDC and Secrets Manager credential-delivery
+path to read `tractorbeam/cloudflare/nonprod/access/constellation-cache-ci`.
+Present its `client_id` and `client_secret` to
+`GET /auth/token?teamId=constellation` as `CF-Access-Client-Id` and
+`CF-Access-Client-Secret` headers. The response body is the short-lived Access
+application JWT for `TURBO_TOKEN`; the Worker returns it only after validating
+Access's signed assertion and the project scope. Set `TURBO_API` and
+`TURBO_TEAM` as above. A connected WARP client alone does not give browserless
+CI a human project identity; the nonprod Access service credential supplies it.
+
+An authorized developer can call the same token endpoint through a valid WARP
+Access session to obtain `TURBO_TOKEN` without sending CI credentials. This
+depends on live confirmation that a corporate-enrolled WARP session is accepted
+by the nonprod Access application.
 
 Use `TURBO_TEAM` (the project slug) rather than `TURBO_TEAMID`: Turbo accepts a
 team ID only when it begins with `team_`, while our project keys do not. Clients

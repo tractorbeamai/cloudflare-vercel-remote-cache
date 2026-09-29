@@ -67,7 +67,7 @@ app.use("*", async (c, next) => {
   if (!limited.success) fail(429, "rate_limited", "Request limit exceeded");
   const path = url.pathname.replace(/^\/v8(?=\/)/, "");
   const methods =
-    path === "/artifacts/status"
+    path === "/auth/token" || path === "/artifacts/status"
       ? ["GET"]
       : ["/artifacts", "/artifacts/events"].includes(path)
         ? ["POST"]
@@ -89,6 +89,15 @@ app.use("*", async (c, next) => {
   await next();
   c.header("Cache-Control", "private, no-store");
   c.header("X-Content-Type-Options", "nosniff");
+});
+
+// Turbo accepts one bearer token, while Access authenticates clients through
+// WARP, cookies, or service credentials. Return the short-lived, project-
+// authorized application JWT that Access passed to this Worker.
+app.get("/auth/token", (c) => {
+  const assertion = c.req.header("Cf-Access-Jwt-Assertion");
+  if (!assertion) fail(401, "unauthorized", "An Access assertion is required");
+  return c.text(assertion);
 });
 
 function hash(value: string): string {

@@ -19,7 +19,9 @@
     "ACCESS_AUD": "7ea8f6af1327a517f315182447cc3982dd8f7d22b8af0973bdedfdd69458a526",
     "MAX_ARTIFACT_BYTES": 67108864,
     // Add public service-token client IDs only alongside an Access Service Auth policy.
-    "SERVICE_PROJECTS": {},
+    "SERVICE_PROJECTS": {
+      "bfd8fae22d2dda10bd17e32fb8335ffe.access": ["constellation"],
+    },
     // Copy remote_cache_project_groups from the applied nonprod infra stack.
     "PROJECTS": {
       "constellation": "Project: Constellation",
