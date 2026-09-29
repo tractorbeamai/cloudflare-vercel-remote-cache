@@ -41,7 +41,7 @@ headroom under Cloudflare's approximate 1 KB custom-claim limit.
 
 Access service tokens do not have human group memberships. The nonprod infra
 stack creates a Constellation-only Service Auth policy and stores its credential
-in AWS Secrets Manager for Constellation's GitHub OIDC role. After applying
+in AWS Secrets Manager for Constellation's RWX vault OIDC role. After applying
 infra, copy `remote_cache_constellation_ci_client_id` into `SERVICE_PROJECTS` in
 `wrangler.jsonc` as `{ "<client-id>": ["constellation"] }` and deploy the Worker.
 The client secret does not belong in Git. Access protects `/auth/token` and
@@ -114,7 +114,7 @@ The local real-Turbo test uses this setup. An invalid assertion cannot fall
 back to a valid bearer. Clients should verify artifact signatures before
 restoring outputs.
 
-For CI, use the existing GitHub OIDC and Secrets Manager credential-delivery
+For CI, use Constellation's RWX OIDC and Secrets Manager credential-delivery
 path to read `tractorbeam/cloudflare/nonprod/access/constellation-cache-ci`.
 Present its `client_id` and `client_secret` to
 `GET /auth/token?teamId=constellation` as `CF-Access-Client-Id` and
