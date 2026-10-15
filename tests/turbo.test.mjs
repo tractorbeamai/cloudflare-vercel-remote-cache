@@ -52,30 +52,23 @@ afterAll(async () => {
 });
 
 function runTurbo(marker, signatureKey) {
+  const env = {
+    ...process.env,
+    TURBO_API: cache.url,
+    TURBO_TEAM: "caddi",
+    TURBO_TOKEN: cache.turboToken,
+    TURBO_TELEMETRY_DISABLED: "1",
+    TURBO_NO_UPDATE_NOTIFIER: "1",
+    BUILD_MARKER: marker,
+  };
+  if (signatureKey) env.TURBO_REMOTE_CACHE_SIGNATURE_KEY = signatureKey;
   return new Promise((resolveRun, reject) => {
     const child = spawn(
       turbo,
-      [
-        "run",
-        "build",
-        "--cache=local:,remote:rw",
-        "--ui=stream",
-        "--env-mode=loose",
-      ],
+      ["run", "build", "--cache=local:,remote:rw", "--ui=stream", "--env-mode=loose"],
       {
         cwd: project,
-        env: {
-          ...process.env,
-          TURBO_API: cache.url,
-          TURBO_TEAM: "caddi",
-          TURBO_TOKEN: cache.turboToken,
-          TURBO_TELEMETRY_DISABLED: "1",
-          TURBO_NO_UPDATE_NOTIFIER: "1",
-          ...(signatureKey
-            ? { TURBO_REMOTE_CACHE_SIGNATURE_KEY: signatureKey }
-            : {}),
-          BUILD_MARKER: marker,
-        },
+        env,
       },
     );
     let output = "";
@@ -105,15 +98,13 @@ test.each([
     const first = await runTurbo(firstMarker, signatureKey);
     expect(first.code, first.output).toBe(0);
     expect(await readFile(firstMarker, "utf8")).toBe("executed");
-    const hash = first.output.match(/cache miss, executing ([a-f0-9]+)/)?.[1];
+    const hash = first.output.match(/cache miss, executing ([a-f0-9]+)/u)?.[1];
     expect(hash, first.output).toBeTruthy();
     const stored = await cache.request(`/v8/artifacts/${hash}`, {
       method: "HEAD",
     });
     expect(stored.status).toBe(200);
-    expect(Boolean(stored.headers.get("x-artifact-tag"))).toBe(
-      Boolean(signatureKey),
-    );
+    expect(Boolean(stored.headers.get("x-artifact-tag"))).toBe(Boolean(signatureKey));
     expect(await readFile(join(project, "dist", "result.txt"), "utf8")).toBe(
       `${name.toUpperCase()} BUILD INPUT\n`,
     );
@@ -122,7 +113,7 @@ test.each([
     await rm(firstMarker);
     const second = await runTurbo(firstMarker, signatureKey);
     expect(second.code, second.output).toBe(0);
-    expect(second.output).toMatch(/cache hit/i);
+    expect(second.output).toMatch(/cache hit/iu);
     expect(await readFile(join(project, "dist", "result.txt"), "utf8")).toBe(
       `${name.toUpperCase()} BUILD INPUT\n`,
     );

@@ -1,9 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
-import {
-  clearArtifacts,
-  installJwksFetch,
-  startHarness,
-} from "./worker-harness.mjs";
+import { clearArtifacts, installJwksFetch, startHarness } from "./worker-harness.mjs";
 
 let cache;
 let restoreFetch;
@@ -26,9 +22,7 @@ test("Worker runtime can write and read a private R2 artifact", async () => {
   expect(upload.status).toBe(202);
   const response = await cache.request("/artifacts/abc123");
   expect(response.status).toBe(200);
-  expect(new TextDecoder().decode(await response.arrayBuffer())).toBe(
-    "private artifact",
-  );
+  expect(new TextDecoder().decode(await response.arrayBuffer())).toBe("private artifact");
 });
 
 test("Worker runtime rejects unsigned access to stored data", async () => {

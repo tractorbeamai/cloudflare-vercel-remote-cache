@@ -3,21 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.11.2",
-  "engines": {
-    "node": ">=22"
-  },
   "scripts": {
     "dev": "wrangler dev",
     "typegen": "wrangler types --strict-vars=false",
     "typecheck": "pnpm typegen && tsc --noEmit",
     "build": "wrangler deploy --dry-run --minify --outdir dist",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mjs",
     "test:contract": "node scripts/test-contract.mjs",
-    "check": "pnpm typecheck && pnpm format:check && pnpm build && pnpm test && pnpm test:integration && pnpm test:contract",
+    "check": "pnpm typecheck && pnpm format:check && pnpm lint && pnpm build && pnpm test && pnpm test:integration && pnpm test:contract",
     "deploy": "wrangler deploy --minify"
   },
   "dependencies": {
@@ -27,13 +25,21 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.2.3",
+    "@tractorbeam/oxfmt-config": "0.2.0",
+    "@tractorbeam/oxlint-config": "0.5.0",
     "@types/node": "26.6.2",
     "esbuild": "0.28.2",
     "miniflare": "5.20260921.0-alpha",
-    "prettier": "3.9.8",
+    "oxfmt": "0.73.0",
+    "oxlint": "1.88.0",
+    "oxlint-tsgolint": "7.0.2004",
     "turbo": "2.11.3",
     "typescript": "7.0.2",
     "vitest": "4.1.0",
     "wrangler": "4.136.3"
-  }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@12.11.2"
 }

@@ -69,10 +69,7 @@ export async function startHarness(overrides = {}, options = {}) {
           },
           env: {
             ...Object.fromEntries(
-              Object.entries(bindings).map(([k, value]) => [
-                k,
-                { type: "json", value },
-              ]),
+              Object.entries(bindings).map(([k, value]) => [k, { type: "json", value }]),
             ),
             ARTIFACTS: { type: "r2", name: "test-artifacts" },
             REQUEST_LIMITER: {
@@ -85,10 +82,10 @@ export async function startHarness(overrides = {}, options = {}) {
         dev: {
           outboundService: {
             type: "fetcher",
-            handler: async (request) => {
+            handler: (request) => {
               if (request.url !== `${issuer}/cdn-cgi/access/certs`)
-                throw new Error(`Unexpected outbound URL: ${request.url}`);
-              return Response.json({ keys: [jwk] });
+                return Promise.reject(new Error(`Unexpected outbound URL: ${request.url}`));
+              return Promise.resolve(Response.json({ keys: [jwk] }));
             },
           },
         },
@@ -105,10 +102,7 @@ export async function startHarness(overrides = {}, options = {}) {
     rawRequest: (path, init = {}) => fetch(new URL(path, url), init),
     request: (path, init = {}) => {
       const target = new URL(path, url);
-      if (
-        !target.searchParams.has("teamId") &&
-        !target.searchParams.has("slug")
-      )
+      if (!target.searchParams.has("teamId") && !target.searchParams.has("slug"))
         target.searchParams.set("teamId", "caddi");
       return fetch(target, {
         ...init,
