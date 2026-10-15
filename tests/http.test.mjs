@@ -10,8 +10,7 @@ afterAll(async () => {
   await h?.close();
 });
 const path = (id) => `/artifacts/${id}`;
-const binaryText = async (response) =>
-  new TextDecoder().decode(await response.arrayBuffer());
+const binaryText = async (response) => new TextDecoder().decode(await response.arrayBuffer());
 const upload = (id, body, headers = {}) =>
   h.request(path(id), {
     method: "PUT",
@@ -87,10 +86,7 @@ test("team selectors require project permission", async () => {
     assert.equal((await h.request(path("a12") + suffix)).status, 403);
     assert.equal((await upload("a12" + suffix, "blocked")).status, 403);
   }
-  assert.equal(
-    (await h.request(path("a12") + "?teamId=caddi&teamId=other")).status,
-    400,
-  );
+  assert.equal((await h.request(path("a12") + "?teamId=caddi&teamId=other")).status, 400);
   assert.equal((await h.request(path("a12") + "?slug=caddi")).status, 200);
 });
 
@@ -143,9 +139,7 @@ test("CI exchanges its Access assertion for a Turbo bearer token scoped to its p
 });
 
 test("concurrent writes and retries preserve the first committed artifact", async () => {
-  const writes = await Promise.all(
-    ["first", "second"].map((body) => upload("a14", body)),
-  );
+  const writes = await Promise.all(["first", "second"].map((body) => upload("a14", body)));
   assert.deepEqual(
     writes.map((r) => r.status),
     [202, 202],
@@ -165,26 +159,13 @@ test("unknown artifacts return 404 and are immediately readable after upload", a
 
 test("malformed requests are rejected and empty binary artifacts round-trip", async () => {
   assert.equal((await upload("not-hex", "x")).status, 400);
-  assert.equal(
-    (await upload("a16", "x", { "x-artifact-duration": "-1" })).status,
-    400,
-  );
-  assert.equal(
-    (await upload("a16", "x", { "x-artifact-tag": "x".repeat(601) })).status,
-    400,
-  );
-  assert.equal(
-    (await upload("a16", "x", { "Content-Type": "application/json" })).status,
-    400,
-  );
+  assert.equal((await upload("a16", "x", { "x-artifact-duration": "-1" })).status, 400);
+  assert.equal((await upload("a16", "x", { "x-artifact-tag": "x".repeat(601) })).status, 400);
+  assert.equal((await upload("a16", "x", { "Content-Type": "application/json" })).status, 400);
   assert.equal((await upload("a16", "")).status, 202);
+  assert.equal((await h.request(path("a16"))).headers.get("Content-Length"), "0");
   assert.equal(
-    (await h.request(path("a16"))).headers.get("Content-Length"),
-    "0",
-  );
-  assert.equal(
-    (await h.request("/internal/delete-expired-objects", { method: "POST" }))
-      .status,
+    (await h.request("/internal/delete-expired-objects", { method: "POST" })).status,
     404,
   );
   assert.equal(
@@ -307,10 +288,7 @@ test("Turbo v8 route and root route address the same artifact", async () => {
   assert.equal((await h.request("/v8/artifacts/status")).status, 200);
   const id = randomBytes(8).toString("hex");
   assert.equal((await upload(id, "from root")).status, 202);
-  assert.equal(
-    await binaryText(await h.request(`/v8/artifacts/${id}`)),
-    "from root",
-  );
+  assert.equal(await binaryText(await h.request(`/v8/artifacts/${id}`)), "from root");
 });
 
 test("binary artifacts retain exact bytes across boundary sizes", async () => {
@@ -356,9 +334,10 @@ test("identical hashes in different projects have separate bytes and metadata", 
     ).status,
     202,
   );
+  const readCaddi = (route, init) => h.request(route, init);
   for (let i = 0; i < 2; i++) {
     for (const [read, body, tag] of [
-      [(route, init) => h.request(route, init), "CADDi artifact", "caddi-tag"],
+      [readCaddi, "CADDi artifact", "caddi-tag"],
       [carlyle, "Carlyle artifact", "carlyle-tag"],
     ]) {
       const response = await read(path(id));
@@ -366,10 +345,7 @@ test("identical hashes in different projects have separate bytes and metadata", 
       assert.equal(await binaryText(response), body);
       assert.equal(response.headers.get("x-artifact-tag"), tag);
       const head = await read(path(id), { method: "HEAD" });
-      assert.equal(
-        head.headers.get("Content-Length"),
-        String(Buffer.byteLength(body)),
-      );
+      assert.equal(head.headers.get("Content-Length"), String(Buffer.byteLength(body)));
       assert.equal(head.headers.get("x-artifact-tag"), tag);
       const batch = await read("/artifacts", {
         method: "POST",
@@ -392,11 +368,7 @@ test("project claims deny cross-project operations after successful reads", asyn
     body: "Carlyle artifact",
     headers: { ...auth, "Content-Type": "application/octet-stream" },
   });
-  assert.equal(
-    (await h.request("/artifacts/b002?teamId=carlyle", { headers: auth }))
-      .status,
-    200,
-  );
+  assert.equal((await h.request("/artifacts/b002?teamId=carlyle", { headers: auth })).status, 200);
   for (const [route, method, body] of [
     ["/artifacts/b002", "GET"],
     ["/artifacts/b002", "HEAD"],
@@ -436,24 +408,15 @@ test("team selection is explicit, unambiguous, and cannot inject a storage path"
     });
     assert.equal(response.status, 400, suffix);
   }
-  assert.equal(
-    (await h.request("/artifacts/status?teamId=constructor")).status,
-    403,
-  );
-  assert.equal(
-    (await h.request("/artifacts/status?teamId=caddi&slug=caddi")).status,
-    200,
-  );
+  assert.equal((await h.request("/artifacts/status?teamId=constructor")).status, 403);
+  assert.equal((await h.request("/artifacts/status?teamId=caddi&slug=caddi")).status, 200);
 });
 
 test.each([
   ["empty project group", { PROJECTS: { caddi: "" } }],
   ["invalid project key", { PROJECTS: { "../caddi": "Project: CADDi" } }],
   ["missing audience", { ACCESS_AUD: "" }],
-  [
-    "invalid service project",
-    { SERVICE_PROJECTS: { "test-client.access": ["../caddi"] } },
-  ],
+  ["invalid service project", { SERVICE_PROJECTS: { "test-client.access": ["../caddi"] } }],
 ])("%s configuration fails closed", async (_case, overrides) => {
   const broken = await startHarness(overrides);
   try {

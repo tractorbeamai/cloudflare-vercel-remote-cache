@@ -7,12 +7,12 @@ const keys = new Map();
 
 export function installJwksFetch() {
   const original = globalThis.fetch;
-  globalThis.fetch = async (input) => {
+  globalThis.fetch = (input) => {
     const url = new URL(input instanceof Request ? input.url : input);
     const key = keys.get(url.origin);
     if (url.pathname === "/cdn-cgi/access/certs" && key)
-      return Response.json({ keys: [key] });
-    throw new Error(`Unexpected outbound URL: ${url}`);
+      return Promise.resolve(Response.json({ keys: [key] }));
+    return Promise.reject(new Error(`Unexpected outbound URL: ${url}`));
   };
   return () => {
     globalThis.fetch = original;
@@ -24,8 +24,7 @@ export async function clearArtifacts() {
   let cursor;
   do {
     const page = await env.ARTIFACTS.list({ cursor });
-    if (page.objects.length)
-      await env.ARTIFACTS.delete(page.objects.map(({ key }) => key));
+    if (page.objects.length) await env.ARTIFACTS.delete(page.objects.map(({ key }) => key));
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
 }
@@ -64,15 +63,13 @@ export async function startHarness(overrides = {}, options = {}) {
       "test-client.access": ["caddi"],
       "caddi-ci.access": ["caddi"],
     },
-    REQUEST_LIMITER: options.rateLimit
-      ? env.REQUEST_LIMITER_LOW
-      : env.REQUEST_LIMITER,
+    REQUEST_LIMITER: options.rateLimit ? env.REQUEST_LIMITER_LOW : env.REQUEST_LIMITER,
     ...overrides,
   };
   const token = await sign();
   const rawRequest = (route, init = {}) => {
     const headers = new Headers(init.headers);
-    if (init.body != null && !headers.has("Content-Length"))
+    if (init.body !== undefined && init.body !== null && !headers.has("Content-Length"))
       headers.set("Content-Length", String(new Blob([init.body]).size));
     return worker.fetch(
       new Request(new URL(route, "https://cache.test"), {
@@ -90,10 +87,7 @@ export async function startHarness(overrides = {}, options = {}) {
     rawRequest,
     request: (route, init = {}) => {
       const target = new URL(route, "https://cache.test");
-      if (
-        !target.searchParams.has("teamId") &&
-        !target.searchParams.has("slug")
-      )
+      if (!target.searchParams.has("teamId") && !target.searchParams.has("slug"))
         target.searchParams.set("teamId", "caddi");
       return rawRequest(target.toString(), {
         ...init,
