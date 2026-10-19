@@ -2,7 +2,7 @@
 
 The nonprod account (`b534f6f9c114635cacb3cfd15861c516`) owns the Worker, private bucket and one Access application. Its issuer is `https://tractorbeam-nonprod.cloudflareaccess.com`, the existing developer WARP organization.
 
-Infra is the source of truth for project opt-in and shared identity. Constellation is the only enabled project initially. Each `remote_cache: true` project in `data/projects.json` contributes one existing Okta `Project: <display_name or name>` group to the application's Allow policy. The nonprod Okta app emits only `Project: ` memberships in its `groups` claim; the Access IdP forwards that claim. The Worker verifies the signed token and requires the requested project's group in `custom.groups`. Missing or malformed claims deny access. The group claim is bounded to 700 bytes and 64 groups across all registered projects, including those without cache access.
+Infra is the source of truth for project opt-in and shared identity. No project is enabled, so the Allow policy is absent and Access admits no one. Each `remote_cache: true` project in `data/projects.json` contributes one existing Okta `Project: <display_name or name>` group to the application's Allow policy. The nonprod Okta app emits only `Project: ` memberships in its `groups` claim; the Access IdP forwards that claim. The Worker verifies the signed token and requires the requested project's group in `custom.groups`. Missing or malformed claims deny access. The group claim is bounded to 700 bytes and 64 groups across all registered projects, including those without cache access.
 
 The applied nonprod Terraform stack exports:
 
