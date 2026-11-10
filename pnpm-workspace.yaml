@@ -2,8 +2,11 @@ allowBuilds:
   esbuild: true
   workerd: true
 minimumReleaseAgeExclude:
-  - wrangler@4.136.3
-  - "@cloudflare/vitest-plugin@1.2.3"
+  # Cloudflare publishes these packages almost daily.
+  - "@cloudflare/*"
+  - wrangler
+  - miniflare
+  - workerd
   - "@turbo/darwin-64@2.11.3"
   - "@turbo/darwin-arm64@2.11.3"
   - "@turbo/linux-64@2.11.3"
