@@ -1,10 +1,9 @@
 configDependencies:
   "@tractorbeam/pnpm-plugin-tractorbeam-defaults": latest
 allowBuilds:
-  esbuild: true
   workerd: true
 minimumReleaseAgeExclude:
-  - "@tractorbeam/*"
+  - "@tractorbeam/pnpm-plugin-tractorbeam-defaults"
   - "@turbo/darwin-64@2.11.3"
   - "@turbo/darwin-arm64@2.11.3"
   - "@turbo/linux-64@2.11.3"
